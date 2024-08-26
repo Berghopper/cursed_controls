@@ -1,6 +1,7 @@
 use std::thread::sleep;
-// use xwiimote::{Device, Monitor};
-// use futures_util::TryStreamExt;
+use xwiimote::{Device, Monitor};
+use futures_util::TryStreamExt;
+use tokio;
 
 // Declare externals
 extern "C" {
@@ -148,6 +149,25 @@ fn example_loop() {
 
 }
 
-fn main() {
-    example_loop();
+#[tokio::main]
+async fn main() {
+    // Create a monitor to enumerate connected Wii Remotes
+    let mut monitor = Monitor::enumerate().unwrap();
+
+    match monitor.try_next().await {
+        Ok(Some(address)) => {
+            // Connect to the Wii Remote with the specified address
+            match Device::connect(&address) {
+                Ok(device) => {
+                    match device.battery() {
+                        Ok(level) => println!("The battery level is {}%", level),
+                        Err(e) => eprintln!("Failed to get battery level: {}", e),
+                    }
+                }
+                Err(e) => eprintln!("Failed to connect to the device: {}", e),
+            }
+        }
+        Ok(None) => println!("No connected device found"),
+        Err(e) => eprintln!("Could not enumerate devices: {}", e),
+    }
 }
