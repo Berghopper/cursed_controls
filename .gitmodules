@@ -1,0 +1,3 @@
+[submodule "src/360-raw-gadget"]
+	path = src/360-raw-gadget
+	url = git@github.com:Berghopper/360-raw-gadget.git
