@@ -1,7 +1,11 @@
-use std::thread::sleep;
-use xwiimote::{Device, Monitor};
 use futures_util::TryStreamExt;
+use num_traits::cast::FromPrimitive;
+use std::thread::sleep;
+use std::time::Duration;
 use tokio;
+use tokio::time::MissedTickBehavior;
+use xwiimote::events::{Event, Key};
+use xwiimote::{Address, Channels, Device, Led, Monitor, Result};
 
 // Declare externals
 extern "C" {
@@ -146,28 +150,140 @@ fn example_loop() {
         send_to_ep1_c(fd, packet.as_ptr(), 20);
     }
     // close_360_gadget_c(fd);
-
 }
 
-#[tokio::main]
-async fn main() {
-    // Create a monitor to enumerate connected Wii Remotes
-    let mut monitor = Monitor::enumerate().unwrap();
+// Wii Remote stuff
+async fn connect(address: &Address) -> Result<()> {
+    let mut device = Device::connect(address)?;
+    let name = device.kind()?;
 
-    match monitor.try_next().await {
-        Ok(Some(address)) => {
-            // Connect to the Wii Remote with the specified address
-            match Device::connect(&address) {
-                Ok(device) => {
-                    match device.battery() {
-                        Ok(level) => println!("The battery level is {}%", level),
-                        Err(e) => eprintln!("Failed to get battery level: {}", e),
-                    }
-                }
-                Err(e) => eprintln!("Failed to connect to the device: {}", e),
-            }
+    device.open(Channels::CORE, true)?;
+    device.open(Channels::NUNCHUK, true)?;
+    println!("Device connected: {name}");
+
+    handle(&mut device).await?;
+    println!("Device disconnected: {name}");
+    Ok(())
+}
+
+/// The metrics that can be displayed in a [`LightsDisplay`].
+#[derive(Debug, Copy, Clone)]
+enum LightsMetric {
+    /// Display the battery level.
+    Battery,
+    /// Display the connection strength level.
+    Connection,
+}
+
+/// The set of lights in a Wii Remote, used as a display.
+struct LightsDisplay<'d> {
+    /// The device whose lights are being controlled.
+    device: &'d Device,
+    /// The metric to display.
+    metric: LightsMetric,
+    /// An interval that ticks whenever the display needs to be updated.
+    interval: tokio::time::Interval,
+}
+
+impl<'d> LightsDisplay<'d> {
+    /// Creates a wrapper for the display of a Wii Remote.
+    pub fn new(device: &'d Device) -> Self {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        Self {
+            device,
+            // The connection strength is probably high immediately
+            // after pairing; display the battery level by default.
+            metric: LightsMetric::Battery,
+            interval,
         }
-        Ok(None) => println!("No connected device found"),
-        Err(e) => eprintln!("Could not enumerate devices: {}", e),
+    }
+
+    /// Completes when the device display should be updated.
+    pub async fn tick(&mut self) -> tokio::time::Instant {
+        print!("tick");
+        self.interval.tick().await
+    }
+
+    /// Updates the device lights according to the current metric.
+    pub async fn update(&self) -> Result<()> {
+        let level = match self.metric {
+            LightsMetric::Battery => self.device.battery()?,
+            LightsMetric::Connection => {
+                // Technically RSSI is a measure of the received intensity
+                // rather than connection quality. This is good enough for
+                // the Wii Remote. The scale goes from -80 to 0, where 0
+                // represents the greatest signal strength.
+                let rssi = 0i8; // todo
+                !((rssi as i16 * 100 / -80) as u8)
+            }
+        };
+
+        // `level` is a value from 0 to 100 (inclusive).
+        let last_ix = 1 + level / 30; // 1..=4
+        for ix in 1..=4 {
+            let light = Led::from_u8(ix).unwrap();
+            self.device.set_led(light, ix <= last_ix)?;
+        }
+        Ok(())
+    }
+
+    /// Updates the displayed metric.
+    pub async fn set_metric(&mut self, metric: LightsMetric) -> Result<()> {
+        self.metric = metric;
+        self.update().await
     }
 }
+
+async fn handle(device: &mut Device) -> Result<()> {
+    let mut event_stream = device.events()?;
+    let mut display = LightsDisplay::new(device);
+
+    loop {
+        // Wait for the next event, which is either an event
+        // emitted by the device or a display update request.
+        let maybe_event = tokio::select! {
+            res = event_stream.try_next() => res?,
+            // _ = display.tick() => {
+            //     display.update().await?;
+            //     continue;
+            // },
+            _ = tokio::time::sleep(Duration::from_millis(1)) => {
+                display.update().await?;
+                continue;
+            },
+        };
+
+        let (event, _time) = match maybe_event {
+            Some(event) => event,
+            None => return Ok(()), // connection closed
+        };
+
+        if let Event::Key(key, state) = event {
+            match key {
+                Key::One => display.set_metric(LightsMetric::Battery).await,
+                Key::Two => display.set_metric(LightsMetric::Connection).await,
+                // If the remote key is mapped to a regular keyboard key,
+                // send a press or release event via the `uinput` API.
+                _ => {
+                    println!("Key {:?} {:?}", key, state);
+                    continue;
+                }
+            };
+        }
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
+    // Create a monitor to enumerate connected Wii Remotes
+    let mut monitor = Monitor::enumerate().unwrap();
+    let address = monitor.try_next().await.unwrap().unwrap();
+    connect(&address).await?;
+
+    Ok(())
+}
+
+// fn main() {
+//     example_loop();
+// }

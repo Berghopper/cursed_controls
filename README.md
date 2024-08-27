@@ -8,8 +8,8 @@ wii remote -> virtual xbox controller
 ## Dependencies
 - using xwiimote; [https://wiki.archlinux.org/title/XWiimote](https://wiki.archlinux.org/title/XWiimote)
 
-## Other deps
-- `sudo apt-get install libvdev-dev`
+## Installation of xwiimote and other dependencies
+- `sudo apt-get install libvdev-dev clang xwiimote`
 
 ## But why?
 
