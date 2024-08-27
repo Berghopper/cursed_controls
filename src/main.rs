@@ -1,11 +1,9 @@
 use futures_util::TryStreamExt;
-use num_traits::cast::FromPrimitive;
 use std::thread::sleep;
 use std::time::Duration;
 use tokio;
-use tokio::time::MissedTickBehavior;
-use xwiimote::events::{Event, Key};
-use xwiimote::{Address, Channels, Device, Led, Monitor, Result};
+use xwiimote::{Address, Channels, Device, Monitor, Result};
+use xwiimote::events::{Event, Key, KeyState, NunchukKey};
 
 // Declare externals
 extern "C" {
@@ -166,112 +164,107 @@ async fn connect(address: &Address) -> Result<()> {
     Ok(())
 }
 
-/// The metrics that can be displayed in a [`LightsDisplay`].
-#[derive(Debug, Copy, Clone)]
-enum LightsMetric {
-    /// Display the battery level.
-    Battery,
-    /// Display the connection strength level.
-    Connection,
-}
-
-/// The set of lights in a Wii Remote, used as a display.
-struct LightsDisplay<'d> {
-    /// The device whose lights are being controlled.
-    device: &'d Device,
-    /// The metric to display.
-    metric: LightsMetric,
-    /// An interval that ticks whenever the display needs to be updated.
-    interval: tokio::time::Interval,
-}
-
-impl<'d> LightsDisplay<'d> {
-    /// Creates a wrapper for the display of a Wii Remote.
-    pub fn new(device: &'d Device) -> Self {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        Self {
-            device,
-            // The connection strength is probably high immediately
-            // after pairing; display the battery level by default.
-            metric: LightsMetric::Battery,
-            interval,
-        }
-    }
-
-    /// Completes when the device display should be updated.
-    pub async fn tick(&mut self) -> tokio::time::Instant {
-        print!("tick");
-        self.interval.tick().await
-    }
-
-    /// Updates the device lights according to the current metric.
-    pub async fn update(&self) -> Result<()> {
-        let level = match self.metric {
-            LightsMetric::Battery => self.device.battery()?,
-            LightsMetric::Connection => {
-                // Technically RSSI is a measure of the received intensity
-                // rather than connection quality. This is good enough for
-                // the Wii Remote. The scale goes from -80 to 0, where 0
-                // represents the greatest signal strength.
-                let rssi = 0i8; // todo
-                !((rssi as i16 * 100 / -80) as u8)
+fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerState) {
+    // Example mapping for rocket league
+    match event {
+        Event::Key(key, key_state) => {
+            let button_state = !matches!(key_state, KeyState::Up);
+            match key {
+                // Jump
+                Key::A => xbox_state.buttons.a = button_state,
+                Key::B => {
+                    // Throttle
+                    xbox_state.right_trigger = if button_state {
+                        u8::max_value()
+                    } else {
+                        u8::min_value()
+                    };
+                }
+                Key::Plus => xbox_state.buttons.start = button_state,
+                Key::Minus => xbox_state.buttons.options = button_state,
+                Key::Up => xbox_state.buttons.dpad_up = button_state,
+                Key::Down => xbox_state.buttons.dpad_down = button_state,
+                Key::Left => xbox_state.buttons.dpad_left = button_state,
+                Key::Right => xbox_state.buttons.dpad_right = button_state,
+                // Ball cam
+                Key::One => xbox_state.buttons.y = button_state,
+                // Handbreak
+                Key::Two => xbox_state.buttons.b = button_state,
+                _ => {}
             }
-        };
-
-        // `level` is a value from 0 to 100 (inclusive).
-        let last_ix = 1 + level / 30; // 1..=4
-        for ix in 1..=4 {
-            let light = Led::from_u8(ix).unwrap();
-            self.device.set_led(light, ix <= last_ix)?;
         }
-        Ok(())
-    }
-
-    /// Updates the displayed metric.
-    pub async fn set_metric(&mut self, metric: LightsMetric) -> Result<()> {
-        self.metric = metric;
-        self.update().await
+        Event::NunchukKey(nunchuk_key, key_state) => {
+            let button_state = !matches!(key_state, KeyState::Up);
+            match nunchuk_key {
+                NunchukKey::Z => {
+                    // Brake
+                    xbox_state.left_trigger = if button_state {
+                        u8::max_value()
+                    } else {
+                        u8::min_value()
+                    };
+                }
+                // Boost
+                NunchukKey::C => xbox_state.buttons.x = button_state,
+            }
+        }
+        Event::NunchukMove {
+            x,
+            y,
+            x_acceleration: _,
+            y_acceleration: _,
+        } => {
+            xbox_state.left_joystick.x = x.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            xbox_state.left_joystick.y = y.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        }
+        _ => {}
     }
 }
 
 async fn handle(device: &mut Device) -> Result<()> {
     let mut event_stream = device.events()?;
-    let mut display = LightsDisplay::new(device);
+    // let mut display = LightsDisplay::new(device);
 
+    // Start xbox gadget
+    let fd = init_360_gadget_c(true);
+    let mut controller_state = XboxControllerState::new();
+
+    let mut gadget_open = true;
     loop {
         // Wait for the next event, which is either an event
         // emitted by the device or a display update request.
         let maybe_event = tokio::select! {
             res = event_stream.try_next() => res?,
-            // _ = display.tick() => {
-            //     display.update().await?;
-            //     continue;
-            // },
             _ = tokio::time::sleep(Duration::from_millis(1)) => {
-                display.update().await?;
                 continue;
             },
         };
 
         let (event, _time) = match maybe_event {
             Some(event) => event,
-            None => return Ok(()), // connection closed
+            None => {
+                // connection closed
+                // close gadget
+                close_360_gadget_c(fd);
+                gadget_open = false;
+                return Ok(());
+            }
         };
 
-        if let Event::Key(key, state) = event {
-            match key {
-                Key::One => display.set_metric(LightsMetric::Battery).await,
-                Key::Two => display.set_metric(LightsMetric::Connection).await,
-                // If the remote key is mapped to a regular keyboard key,
-                // send a press or release event via the `uinput` API.
-                _ => {
-                    println!("Key {:?} {:?}", key, state);
-                    continue;
-                }
-            };
+        if !gadget_open {
+            // Exit.
+            break;
+        }
+
+        map_wii_event_to_xbox_state(event, &mut controller_state);
+        // emit to gadget
+        let success = send_to_ep1_c(fd, controller_state.to_packet().as_ptr(), 20);
+        if !success {
+            // Probably crashed?
+            break;
         }
     }
+    return Ok(());
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -283,7 +276,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-
-// fn main() {
-//     example_loop();
-// }
