@@ -3,7 +3,7 @@ name = "cursed_controls"
 version = "0.1.0"
 edition = "2021"
 
-build = "src/build.rs"
+build = "build.rs"
 
 [dependencies]
 futures-util = "0.3.30"
