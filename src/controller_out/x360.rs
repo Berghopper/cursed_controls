@@ -1,4 +1,4 @@
-use crate::controller_abs::{Axis, BitPackedButton, BitPackedButtons};
+use crate::{controller_abs::{Axis, BitPackedButton, BitPackedButtons, JoystickState}, AxisNew, JoystickStateNew};
 use std::{u8, vec};
 
 pub struct XboxButtonState {
@@ -76,13 +76,6 @@ impl XboxButtonState {
     }
 }
 
-pub struct JoystickState {
-    // LE values, 0x0000 is left, 0xFFFF is right
-    pub x: Axis,
-    // LE values, 0x0000 is down, 0xFFFF is up
-    pub y: Axis,
-}
-
 pub struct XboxControllerState {
     pub buttons: XboxButtonState,
     pub left_trigger: Axis,
@@ -95,16 +88,10 @@ impl XboxControllerState {
     pub fn new() -> XboxControllerState {
         XboxControllerState {
             buttons: XboxButtonState::new(),
-            left_trigger: Axis::new(u8::MIN, Some(u8::MIN), Some(u8::MAX), None),
-            right_trigger: Axis::new(u8::MIN, Some(u8::MIN), Some(u8::MAX), None),
-            left_joystick: JoystickState {
-                x: Axis::new(0, Some(i16::MIN), Some(i16::MAX), None),
-                y: Axis::new(0, Some(i16::MIN), Some(i16::MAX), None),
-            },
-            right_joystick: JoystickState {
-                x: Axis::new(0, Some(i16::MIN), Some(i16::MAX), None),
-                y: Axis::new(0, Some(i16::MIN), Some(i16::MAX), None),
-            },
+            left_trigger: AxisNew!(u8::MIN),
+            right_trigger: AxisNew!(u8::MIN),
+            left_joystick: JoystickStateNew!(i16, 0),
+            right_joystick: JoystickStateNew!(i16, 0),
         }
     }
 
