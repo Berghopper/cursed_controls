@@ -1,5 +1,5 @@
-use std::vec;
 use crate::controller_abs::{Axis, BitPackedButton, BitPackedButtons};
+use std::{u8, vec};
 
 pub struct XboxButtonState {
     pub a: BitPackedButton,
@@ -95,15 +95,15 @@ impl XboxControllerState {
     pub fn new() -> XboxControllerState {
         XboxControllerState {
             buttons: XboxButtonState::new(),
-            left_trigger: Axis::new(u8::MIN, None, None, None),
-            right_trigger: Axis::new(u8::MIN, None, None, None),
+            left_trigger: Axis::new(u8::MIN, Some(u8::MIN), Some(u8::MAX), None),
+            right_trigger: Axis::new(u8::MIN, Some(u8::MIN), Some(u8::MAX), None),
             left_joystick: JoystickState {
-                x: Axis::new(i16::MIN, None, None, None),
-                y: Axis::new(i16::MIN, None, None, None),
+                x: Axis::new(0, Some(i16::MIN), Some(i16::MAX), None),
+                y: Axis::new(0, Some(i16::MIN), Some(i16::MAX), None),
             },
             right_joystick: JoystickState {
-                x: Axis::new(i16::MIN, None, None, None),
-                y: Axis::new(i16::MIN, None, None, None),
+                x: Axis::new(0, Some(i16::MIN), Some(i16::MAX), None),
+                y: Axis::new(0, Some(i16::MIN), Some(i16::MAX), None),
             },
         }
     }
@@ -115,11 +115,35 @@ impl XboxControllerState {
         packet[2] = self.buttons.get_control_byte_2();
         packet[3] = self.buttons.get_control_byte_3();
         packet[4] = self.left_trigger.convert_into(Some(false));
-        packet[5] = self.right_trigger.convert_into(Some(false));;
-        packet[6..8].copy_from_slice(&self.left_joystick.x.convert_into::<i16>(Some(false)).to_le_bytes());
-        packet[8..10].copy_from_slice(&self.left_joystick.y.convert_into::<i16>(Some(false)).to_le_bytes());
-        packet[10..12].copy_from_slice(&self.right_joystick.x.convert_into::<i16>(Some(false)).to_le_bytes());
-        packet[12..14].copy_from_slice(&self.right_joystick.y.convert_into::<i16>(Some(false)).to_le_bytes());
+        packet[5] = self.right_trigger.convert_into(Some(false));
+        packet[6..8].copy_from_slice(
+            &self
+                .left_joystick
+                .x
+                .convert_into::<i16>(Some(false))
+                .to_le_bytes(),
+        );
+        packet[8..10].copy_from_slice(
+            &self
+                .left_joystick
+                .y
+                .convert_into::<i16>(Some(false))
+                .to_le_bytes(),
+        );
+        packet[10..12].copy_from_slice(
+            &self
+                .right_joystick
+                .x
+                .convert_into::<i16>(Some(false))
+                .to_le_bytes(),
+        );
+        packet[12..14].copy_from_slice(
+            &self
+                .right_joystick
+                .y
+                .convert_into::<i16>(Some(false))
+                .to_le_bytes(),
+        );
         packet
     }
 }
