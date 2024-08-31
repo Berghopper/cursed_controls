@@ -5,11 +5,9 @@ For now;
 wii remote -> virtual xbox controller
 
 # pi0 - wii remote
-## Dependencies
-- using xwiimote; [https://wiki.archlinux.org/title/XWiimote](https://wiki.archlinux.org/title/XWiimote)
 
-## Installation of xwiimote and other dependencies
-- `sudo apt-get install libvdev-dev clang xwiimote`
+For setup, take a look at [this gist.](https://gist.github.com/Berghopper/e4a814bbefb9e77d2a628324d8966c99)
+(Don't run the commands, just simply follow along.)
 
 ## But why?
 
