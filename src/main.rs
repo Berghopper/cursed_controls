@@ -122,42 +122,43 @@ fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerStat
             x_acceleration: _,
             y_acceleration: _,
         } => {
-            let from_min = -128;
-            let from_max = 128;
+            // Specific limits to my controller
+            // TODO; make cli that can set this..?
+            let x_min = -88;
+            let x_max = 110;
+            let y_min = -102;
+            let y_max = 94;
+            let mut nunchuck_x = Axis::new(x, x_min, x_max);
+            let mut nunchuck_y = Axis::new(y, y_min, y_max);
 
-            let mut nunchuck_x = Axis::new(x, from_min, from_max);
-            let mut nunchuck_y = Axis::new(y, from_min, from_max);
-
-            // Specific deadzone to my controller
-            // TODO; make cli that can set this..
-            let deadzone_vec_x = vec![-7..7, from_min..-87, 109..from_max];
-            let deadzone_vec_y = vec![-7..7, from_min..-101, 93..from_max];
+            let deadzone_vec_x = vec![-10..10];
+            let deadzone_vec_y = vec![-10..10];
 
             nunchuck_x.set_deadzones(nunchuck_x.make_deadzone(
                 deadzone_vec_x.to_owned(),
-                from_min,
-                from_max,
+                x_min,
+                x_max,
             ));
             nunchuck_y.set_deadzones(nunchuck_y.make_deadzone(
                 deadzone_vec_y.to_owned(),
-                from_min,
-                from_max,
+                y_min,
+                y_max,
             ));
 
-            xbox_state.left_joystick.x.value = nunchuck_x.convert_into(Some(true));
-            xbox_state.left_joystick.y.value = nunchuck_y.convert_into(Some(true));
+            xbox_state.left_joystick.x.value = nunchuck_x.convert_into(true);
+            xbox_state.left_joystick.y.value = nunchuck_y.convert_into(true);
         }
         _ => {}
     }
 }
 
 async fn handle(device: &mut Device) -> Result<()> {
-    let mut event_stream = device.events()?;
-    // let mut display = LightsDisplay::new(device);
-
     // Start xbox gadget
     let fd = init_360_gadget_c(true);
+    // Wait 1 sec because C lib spam.
+    tokio::time::sleep(Duration::from_secs(1)).await;
     let mut controller_state = XboxControllerState::new();
+    let mut event_stream = device.events()?;
 
     loop {
         // Wait for the next event, which is either an event
