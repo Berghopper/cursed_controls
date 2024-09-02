@@ -55,16 +55,20 @@ fn example_loop() {
 }
 
 // Wii Remote stuff
-async fn connect(address: &Address) -> Result<()> {
-    let mut device = Device::connect(address)?;
-    let name = device.kind()?;
+async fn connect(addresses: Vec<Address>) -> Result<()> {
+    let mut devices = vec![];
+    for addr in &addresses {
+        let mut device = Device::connect(addr)?;
+        let name = device.kind()?;
 
-    device.open(Channels::CORE, true)?;
-    device.open(Channels::NUNCHUK, true)?;
-    println!("Device connected: {name}");
+        device.open(Channels::CORE, true)?;
+        device.open(Channels::NUNCHUK, true)?;
+        println!("Device connected: {name}");
+        devices.push(device);
+    }
 
-    handle(&mut device).await?;
-    println!("Device disconnected: {name}");
+    handle(devices).await?;
+    // println!("Device disconnected: {name}");
     Ok(())
 }
 
@@ -151,43 +155,57 @@ fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerStat
     }
 }
 
-async fn handle(device: &mut Device) -> Result<()> {
+async fn handle(devices: Vec<Device>) -> Result<()> {
     // Start xbox gadget
     // 1 controller
-    let fd = init_360_gadget_c(true, 1);
+    let fd = init_360_gadget_c(true, devices.len().try_into().unwrap());
     // Wait 1 sec because C lib spam.
     tokio::time::sleep(Duration::from_secs(1)).await;
-    let mut controller_state = XboxControllerState::new();
-    let mut event_stream = device.events()?;
 
+    let mut controller_states: Vec<XboxControllerState> = vec![];
+
+    for _i in 0..devices.len() {
+        controller_states.push(XboxControllerState::new());
+    }
     loop {
-        // Wait for the next event, which is either an event
-        // emitted by the device or a display update request.
-        let maybe_event = tokio::select! {
-            res = event_stream.try_next() => res?,
-            _ = tokio::time::sleep(Duration::from_millis(5)) => { // TODO: Make this a setting somehow
-                continue;
-            },
-        };
+        for i in 0..devices.len() {
+            let device = &devices[i];
+            let controller_state = &mut controller_states[i];
+            let mut event_stream = device.events()?;
 
-        let (event, _time) = match maybe_event {
-            Some(event) => event,
-            None => {
-                // connection closed
-                // close gadget and exit
-                close_360_gadget_c(fd);
+            // Wait for the next event, which is either an event
+            // emitted by the device or a display update request.
+            let maybe_event = tokio::select! {
+                res = event_stream.try_next() => res?,
+                _ = tokio::time::sleep(Duration::from_millis(5)) => { // TODO: Make this a setting somehow
+                    continue;
+                },
+            };
+
+            let (event, _time) = match maybe_event {
+                Some(event) => event,
+                None => {
+                    // connection closed
+                    // close gadget and exit
+                    close_360_gadget_c(fd);
+                    break;
+                }
+            };
+
+            map_wii_event_to_xbox_state(event, controller_state);
+            // After sending state, sleep 1ms.
+            tokio::time::sleep(Duration::from_micros(900)).await;
+            // emit to gadget
+            let success = send_to_ep_c(
+                fd,
+                i.try_into().unwrap(),
+                controller_state.to_packet().as_ptr(),
+                20,
+            );
+            if !success {
+                // Probably crashed?
                 break;
             }
-        };
-
-        map_wii_event_to_xbox_state(event, &mut controller_state);
-        // After sending state, sleep 1ms.
-        tokio::time::sleep(Duration::from_micros(900)).await;
-        // emit to gadget
-        let success = send_to_ep_c(fd, 1, controller_state.to_packet().as_ptr(), 20);
-        if !success {
-            // Probably crashed?
-            break;
         }
     }
     return Ok(());
@@ -197,7 +215,17 @@ async fn handle(device: &mut Device) -> Result<()> {
 async fn main() -> Result<()> {
     // Create a monitor to enumerate connected Wii Remotes
     let mut monitor = Monitor::enumerate().unwrap();
-    let address = monitor.try_next().await.unwrap().unwrap();
-    connect(&address).await?;
+    let mut addresses = Vec::new();
+    loop {
+        let opt_addr = monitor.try_next().await.unwrap();
+        if opt_addr.is_none() {
+            break;
+        } else {
+            addresses.push(opt_addr.unwrap());
+        }
+    }
+    println!("{}", addresses.len());
+
+    connect(addresses).await?;
     Ok(())
 }
