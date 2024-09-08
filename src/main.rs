@@ -1,4 +1,4 @@
-use controller_abs::{Axis};
+use controller_abs::{Axis, ControllerInput, OutputMapping};
 use futures_util::TryStreamExt;
 use std::thread::sleep;
 use std::time::Duration;
@@ -9,12 +9,14 @@ use xwiimote::{Address, Channels, Device, Monitor, Result};
 #[allow(dead_code)]
 mod controller_abs;
 #[allow(dead_code)]
-mod controller_out;
-#[allow(dead_code)]
 mod controller_in;
+#[allow(dead_code)]
+mod controller_out;
+
+use controller_abs::GamepadButton;
+use controller_in::XWiiInput;
 
 use controller_out::x360::XboxControllerState;
-
 
 // Declare externals
 extern "C" {
@@ -216,20 +218,15 @@ async fn handle(devices: Vec<Device>) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    // XWiiInput::new();
     // Create a monitor to enumerate connected Wii Remotes
     let mut monitor = Monitor::enumerate().unwrap();
-    let mut addresses = Vec::new();
-    loop {
-        let opt_addr = monitor.try_next().await.unwrap();
-        if opt_addr.is_none() {
-            break;
-        } else {
-            addresses.push(opt_addr.unwrap());
-        }
-    }
-    println!("{}", addresses.len());
+    let address = monitor.try_next().await.unwrap().unwrap();
+    let mut wiiInput = XWiiInput::new(&address);
+    wiiInput.map_event(
+        Event::Key(Key::A, KeyState::Up),
+        OutputMapping::Button(GamepadButton::South),
+    );
 
-    connect(addresses).await?;
+    // connect(&address).await?;
     Ok(())
 }

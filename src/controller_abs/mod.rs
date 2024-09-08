@@ -371,28 +371,17 @@ impl Gamepad {
             buttons.insert(button, false);
         }
         for axis_type in GamepadAxis::iter() {
-            match axis_type {
-                GamepadAxis::LeftJoystickX
-                | GamepadAxis::LeftJoystickY
-                | GamepadAxis::RightJoystickX
-                | GamepadAxis::RightJoystickY => {
-                    let x: i16 = 0;
-                    axes.insert(axis_type, AxisNew!(x));
-                }
-                _ => {
-                    axes.insert(axis_type, AxisNew!(0));
-                }
-            }
+            axes.insert(axis_type, AxisNew!(0));
         }
 
         Gamepad { buttons, axes }
     }
 
-    fn setButton(self: &mut Self, button: GamepadButton, value: bool) {
+    pub fn setButton(self: &mut Self, button: GamepadButton, value: bool) {
          *self.buttons.get_mut(&button).unwrap() = value;
     }
 
-    fn getAxisRef(self: &mut Self, axis: GamepadAxis) -> &mut Axis {
+    pub fn getAxisRef(self: &mut Self, axis: GamepadAxis) -> &mut Axis {
         return self.axes.get_mut(&axis).unwrap()
     }
 }
