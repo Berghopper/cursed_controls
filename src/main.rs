@@ -1,4 +1,4 @@
-use controller_abs::Axis;
+use controller_abs::{Axis};
 use futures_util::TryStreamExt;
 use std::thread::sleep;
 use std::time::Duration;
@@ -11,7 +11,10 @@ mod controller_abs;
 #[allow(dead_code)]
 mod controller_out;
 #[allow(dead_code)]
+mod controller_in;
+
 use controller_out::x360::XboxControllerState;
+
 
 // Declare externals
 extern "C" {
@@ -213,6 +216,7 @@ async fn handle(devices: Vec<Device>) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    // XWiiInput::new();
     // Create a monitor to enumerate connected Wii Remotes
     let mut monitor = Monitor::enumerate().unwrap();
     let mut addresses = Vec::new();
