@@ -66,22 +66,6 @@ async fn connect(address: &Address) -> Result<()> {
     Ok(())
 }
 
-// fn nunchuck_to_xbox_joystick(nunchuck_axis: i32) -> i16 {
-//     // Depending on the nunchuck, values range from about ~ -110 - 90 or -90 - 110
-//     // So the working range is -90 - 90, with a +- deadzone of 10 around 0.
-//     if nunchuck_axis >= -10 && nunchuck_axis <= 10 {
-//         return 0; // Deadzone mapping
-//     } else if nunchuck_axis < -10 {
-//         // Map from [-90, -10] to [-32768, 0]
-//         let mapped_value = ((nunchuck_axis + 10) as f32 / -77.0) * i16::MIN as f32;
-//         return mapped_value as i16;
-//     } else {
-//         // Map from [10, 90] to [0, 32767]
-//         let mapped_value = ((nunchuck_axis - 10) as f32 / 77.0) * i16::MAX as f32;
-//         return mapped_value as i16;
-//     }
-// }
-
 fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerState) {
     // Example mapping for rocket league
     match event {
@@ -135,9 +119,20 @@ fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerStat
             x_acceleration: _,
             y_acceleration: _,
         } => {
-            let deadzone = Axis::make_deadzone(vec![-10..10, -128..-90, 90..128], -128, 128);
-            let nunchuck_x = Axis::new(x, Some(-128), Some(128), Some(deadzone.clone()));
-            let nunchuck_y = Axis::new(y, Some(-128), Some(128), Some(deadzone).clone());
+            let mut nunchuck_x = Axis::new(x, Some(-128), Some(128), None);
+            let mut nunchuck_y = Axis::new(y, Some(-128), Some(128), None);
+
+            let deadzone_vec = vec![-8..8, -128..-70, 70..128];
+            nunchuck_x.set_deadzones(Some(nunchuck_x.make_deadzone(
+                deadzone_vec.to_owned(),
+                -128,
+                128,
+            )));
+            nunchuck_y.set_deadzones(Some(nunchuck_y.make_deadzone(
+                deadzone_vec.to_owned(),
+                -128,
+                128,
+            )));
 
             xbox_state.left_joystick.x.value = nunchuck_x.convert_into(Some(true));
             xbox_state.left_joystick.y.value = nunchuck_y.convert_into(Some(true));
@@ -160,7 +155,7 @@ async fn handle(device: &mut Device) -> Result<()> {
         // emitted by the device or a display update request.
         let maybe_event = tokio::select! {
             res = event_stream.try_next() => res?,
-            _ = tokio::time::sleep(Duration::from_millis(1)) => {
+            _ = tokio::time::sleep(Duration::from_millis(5)) => { // TODO: Make this a setting somehow
                 continue;
             },
         };
@@ -182,6 +177,8 @@ async fn handle(device: &mut Device) -> Result<()> {
         }
 
         map_wii_event_to_xbox_state(event, &mut controller_state);
+        // After sending state, sleep 1ms.
+        tokio::time::sleep(Duration::from_micros(900)).await;
         // emit to gadget
         let success = send_to_ep1_c(fd, controller_state.to_packet().as_ptr(), 20);
         if !success {

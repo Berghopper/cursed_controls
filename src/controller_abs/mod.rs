@@ -46,10 +46,7 @@ where
     let normalized_value = (from_value.to_f64().unwrap() - from_min_f64) / from_range_;
 
     // Scale the normalized value to the target type's range
-    let mut scaled_value = normalized_value * to_range_;
-
-    // Clamp the scaled value to the valid range of the target type
-    scaled_value = scaled_value.clamp(to_min_f64, to_max_f64);
+    let scaled_value = normalized_value * to_range_ + to_min_f64;
 
     // Convert the clamped value to the target type
     To::from_f64(scaled_value).unwrap_or_else(|| {
@@ -79,26 +76,25 @@ impl Axis {
     where
         T: NormalizableNumber,
     {
-        let min_val = if let Some(min) = min {
-            min.to_u64()
-        } else {
-            Some(u64::MIN)
-        };
-        let max_val = if let Some(max) = max {
-            max.to_u64()
-        } else {
-            Some(u64::MAX)
-        };
+        let min_val = normalize(
+            min.unwrap_or_else(|| T::min_value()),
+            Some(T::min_value()),
+            Some(T::max_value()),
+            Some(u64::MIN),
+            Some(u64::MAX),
+        );
+        let max_val = normalize(
+            max.unwrap_or_else(|| T::max_value()),
+            Some(T::min_value()),
+            Some(T::max_value()),
+            Some(u64::MIN),
+            Some(u64::MAX),
+        );
+
         Axis {
-            value: normalize(
-                from_value,
-                min,
-                max,
-                min.unwrap().to_u64(),
-                max.unwrap().to_u64(),
-            ),
-            min: min_val.unwrap(),
-            max: max_val.unwrap(),
+            value: normalize(from_value, min, max, Some(min_val), Some(max_val)),
+            min: min_val,
+            max: max_val,
             deadzones: deadzones,
         }
     }
@@ -107,16 +103,20 @@ impl Axis {
     where
         T: NormalizableNumber,
     {
-        let min_val = if let Some(min) = min {
-            min.to_u64()
-        } else {
-            Some(u64::MIN)
-        };
-        let max_val = if let Some(max) = max {
-            max.to_u64()
-        } else {
-            Some(u64::MAX)
-        };
+        let min_val = normalize(
+            min.unwrap_or_else(|| T::min_value()),
+            Some(T::min_value()),
+            Some(T::max_value()),
+            Some(u64::MIN),
+            Some(u64::MAX),
+        );
+        let max_val = normalize(
+            max.unwrap_or_else(|| T::max_value()),
+            Some(T::min_value()),
+            Some(T::max_value()),
+            Some(u64::MIN),
+            Some(u64::MAX),
+        );
         self.value = normalize(
             from_value,
             min,
@@ -124,8 +124,8 @@ impl Axis {
             min.unwrap().to_u64(),
             max.unwrap().to_u64(),
         );
-        self.min = min_val.unwrap();
-        self.max = max_val.unwrap();
+        self.min = min_val;
+        self.max = max_val;
     }
 
     pub fn get_value(&mut self) -> &u64 {
@@ -149,6 +149,7 @@ impl Axis {
     }
 
     pub fn make_deadzone<T>(
+        &self,
         input: Vec<std::ops::Range<T>>,
         min: T,
         max: T,
@@ -159,10 +160,20 @@ impl Axis {
         input
             .into_iter()
             .map(|range| {
-                let start_normalized =
-                    normalize::<T, u64>(range.start, Some(min), Some(max), None, None);
-                let end_normalized =
-                    normalize::<T, u64>(range.end, Some(min), Some(max), None, None);
+                let start_normalized = normalize::<T, u64>(
+                    range.start,
+                    Some(min),
+                    Some(max),
+                    Some(self.min),
+                    Some(self.max),
+                );
+                let end_normalized = normalize::<T, u64>(
+                    range.end,
+                    Some(min),
+                    Some(max),
+                    Some(self.min),
+                    Some(self.max),
+                );
                 std::ops::Range {
                     start: start_normalized,
                     end: end_normalized,
@@ -175,37 +186,44 @@ impl Axis {
     where
         T: NormalizableNumber,
     {
+        // Normalization step, usually between two different Axis systems
         // Apply deadzones if needed
         if use_deadzones.unwrap_or(true) {
             if let Some(deadzones) = &self.deadzones {
                 for deadzone in deadzones {
                     if deadzone.contains(&self.value) {
-                        // If the value falls within a deadzone, return the closest bound
-                        let closest_bound = if self.value < (self.min + self.max) / 2 {
-                            self.min
+                        let norm_range =
+                            (self.min.to_f64().unwrap() - self.max.to_f64().unwrap()).abs();
+                        let normalized_ratio = (self.value.to_f64().unwrap()
+                            - self.min.to_f64().unwrap())
+                            / norm_range;
+                        let deadzone_start_ratio = (deadzone.start.to_f64().unwrap()
+                            - self.min.to_f64().unwrap())
+                            / norm_range;
+                        let deadzone_end_ratio = (deadzone.end.to_f64().unwrap()
+                            - self.min.to_f64().unwrap())
+                            / norm_range;
+
+                        println!("dedrat: {}", normalized_ratio);
+                        if (deadzone_start_ratio > 0.3 && deadzone_end_ratio < 0.7) {
+                            // 'middle' deadzone?
+                            let middle_value_f64 = self.min.to_f64().unwrap()
+                                + (self.max.to_f64().unwrap() - self.min.to_f64().unwrap()) / 2.0;
+                            println!("middl; {}", middle_value_f64);
+                            return T::from_f64(middle_value_f64).unwrap();
+                        } else if (normalized_ratio < 0.3) {
+                            // Min
+                            return T::min_value();
                         } else {
-                            self.max
-                        };
-                        return T::from_u64(closest_bound).unwrap();
+                            // Max
+                            return T::max_value();
+                        }
                     }
                 }
             }
         }
 
-        if self.min >= self.max || self.value < self.min || self.value > self.max {
-            // Out of bounds, return closest
-            let closest_bound = if self.value < (self.min + self.max) / 2 {
-                self.min
-            } else {
-                self.max
-            };
-            return T::from_u64(closest_bound).unwrap();
-        }
-
-        let t_min = Some(T::min_value());
-        let t_max = Some(T::max_value());
-
-        return normalize(self.value, Some(self.min), Some(self.max), t_min, t_max);
+        return normalize(self.value, Some(self.min), Some(self.max), None, None);
     }
 }
 
