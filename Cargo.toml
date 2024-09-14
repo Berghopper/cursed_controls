@@ -6,3 +6,5 @@ edition = "2021"
 build = "src/build.rs"
 
 [dependencies]
+futures-util = "0.3.30"
+xwiimote="0.2.5"
