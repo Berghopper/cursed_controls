@@ -15,14 +15,13 @@ use controller_out::x360::XboxControllerState;
 
 // Declare externals
 extern "C" {
-    fn init_360_gadget(await_endpoint_availability: bool) -> i32;
+    fn init_360_gadget(await_endpoint_availability: bool, n_interfaces: i32) -> i32;
     fn close_360_gadget(fd: i32);
-    fn send_to_ep1(fd: i32, data: *const u8, len: usize) -> bool;
-    // fn gadget_example();
+    fn send_to_ep(fd: i32, n: i32, data: *const u8, len: usize) -> bool;
 }
 
-fn init_360_gadget_c(await_endpoint_availability: bool) -> i32 {
-    unsafe { init_360_gadget(await_endpoint_availability) }
+fn init_360_gadget_c(await_endpoint_availability: bool, n_interfaces: i32) -> i32 {
+    unsafe { init_360_gadget(await_endpoint_availability, n_interfaces) }
 }
 
 #[allow(dead_code)]
@@ -30,15 +29,15 @@ fn close_360_gadget_c(fd: i32) {
     unsafe { close_360_gadget(fd) }
 }
 
-fn send_to_ep1_c(fd: i32, data: *const u8, len: usize) -> bool {
-    unsafe { send_to_ep1(fd, data, len) }
+fn send_to_ep_c(fd: i32, n: i32, data: *const u8, len: usize) -> bool {
+    unsafe { send_to_ep(fd, n, data, len) }
 }
 
 #[allow(dead_code)]
 fn example_loop() {
     print!("Starting 360 gadget...");
 
-    let fd = init_360_gadget_c(true);
+    let fd = init_360_gadget_c(true, 1);
     let mut controller_state = XboxControllerState::new();
     loop {
         sleep(std::time::Duration::from_secs(1));
@@ -50,7 +49,7 @@ fn example_loop() {
         controller_state.left_joystick.x.value = 32760;
         controller_state.left_joystick.y.value = 32760;
         let packet = controller_state.to_packet();
-        send_to_ep1_c(fd, packet.as_ptr(), 20);
+        send_to_ep_c(fd, 1, packet.as_ptr(), 20);
     }
     // close_360_gadget_c(fd);
 }
@@ -154,7 +153,8 @@ fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerStat
 
 async fn handle(device: &mut Device) -> Result<()> {
     // Start xbox gadget
-    let fd = init_360_gadget_c(true);
+    // 1 controller
+    let fd = init_360_gadget_c(true, 1);
     // Wait 1 sec because C lib spam.
     tokio::time::sleep(Duration::from_secs(1)).await;
     let mut controller_state = XboxControllerState::new();
@@ -184,7 +184,7 @@ async fn handle(device: &mut Device) -> Result<()> {
         // After sending state, sleep 1ms.
         tokio::time::sleep(Duration::from_micros(900)).await;
         // emit to gadget
-        let success = send_to_ep1_c(fd, controller_state.to_packet().as_ptr(), 20);
+        let success = send_to_ep_c(fd, 1, controller_state.to_packet().as_ptr(), 20);
         if !success {
             // Probably crashed?
             break;
