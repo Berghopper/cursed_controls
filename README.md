@@ -6,8 +6,8 @@ wii remote -> virtual xbox controller
 
 # pi0 - wii remote
 
-For setup, take a look at [this gist.](https://gist.github.com/Berghopper/e4a814bbefb9e77d2a628324d8966c99)
-(Don't run the commands, just simply follow along.)
+For setup, take a look at the `init-raspbian.sh`, `setup-raspbian.sh` and `run-raspbian.sh` scripts.
+These should work out of the box for the pi0.
 
 ## But why?
 
