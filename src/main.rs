@@ -1,10 +1,10 @@
-use controller_abs::{Axis, ControllerInput, OutputMapping};
+use controller_abs::{ControllerInput, GamepadAxis, OutputMapping};
 use futures_util::TryStreamExt;
 use std::thread::sleep;
 use std::time::Duration;
 use tokio;
 use xwiimote::events::{Event, Key, KeyState, NunchukKey};
-use xwiimote::{Address, Channels, Device, Monitor, Result};
+use xwiimote::{Monitor, Result};
 
 #[allow(dead_code)]
 mod controller_abs;
@@ -59,174 +59,91 @@ fn example_loop() {
     // close_360_gadget_c(fd);
 }
 
-// Wii Remote stuff
-async fn connect(addresses: Vec<Address>) -> Result<()> {
-    let mut devices = vec![];
-    for addr in &addresses {
-        let mut device = Device::connect(addr)?;
-        let name = device.kind()?;
-
-        device.open(Channels::CORE, true)?;
-        device.open(Channels::NUNCHUK, true)?;
-        println!("Device connected: {name}");
-        devices.push(device);
-    }
-
-    handle(devices).await?;
-    // println!("Device disconnected: {name}");
-    Ok(())
-}
-
-fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerState) {
-    // Example mapping for rocket league
-    match event {
-        Event::Key(key, key_state) => {
-            let button_state = !matches!(key_state, KeyState::Up);
-            match key {
-                // Jump
-                Key::A => xbox_state.buttons.a.value = button_state,
-                Key::B => {
-                    // Throttle
-                    xbox_state.right_trigger.value = if button_state {
-                        u64::max_value()
-                    } else {
-                        u64::min_value()
-                    };
-                }
-                Key::Plus => xbox_state.buttons.start.value = button_state,
-                Key::Minus => xbox_state.buttons.options.value = button_state,
-
-                // boost
-                Key::Down => xbox_state.buttons.b.value = button_state,
-
-                // DPAD
-                Key::Up => xbox_state.buttons.dpad_up.value = button_state,
-                Key::Left => xbox_state.buttons.dpad_left.value = button_state,
-                Key::Right => xbox_state.buttons.dpad_right.value = button_state,
-                Key::Two => xbox_state.buttons.dpad_down.value = button_state,
-                // Ball cam
-                Key::One => xbox_state.buttons.y.value = button_state,
-                _ => {}
-            }
-        }
-        Event::NunchukKey(nunchuk_key, key_state) => {
-            let button_state = !matches!(key_state, KeyState::Up);
-            match nunchuk_key {
-                NunchukKey::Z => {
-                    // Brake
-                    xbox_state.left_trigger.value = if button_state {
-                        u64::max_value()
-                    } else {
-                        u64::min_value()
-                    };
-                }
-                // Handbreak
-                NunchukKey::C => xbox_state.buttons.x.value = button_state,
-            }
-        }
-        Event::NunchukMove {
-            x,
-            y,
-            x_acceleration: _,
-            y_acceleration: _,
-        } => {
-            // Specific limits to my controller
-            // TODO; make cli that can set this..?
-            let x_min = -88;
-            let x_max = 110;
-            let y_min = -102;
-            let y_max = 94;
-            let mut nunchuck_x = Axis::new(x, x_min, x_max);
-            let mut nunchuck_y = Axis::new(y, y_min, y_max);
-
-            let deadzone_vec_x = vec![-10..10];
-            let deadzone_vec_y = vec![-10..10];
-
-            nunchuck_x.set_deadzones(nunchuck_x.make_deadzone(
-                deadzone_vec_x.to_owned(),
-                x_min,
-                x_max,
-            ));
-            nunchuck_y.set_deadzones(nunchuck_y.make_deadzone(
-                deadzone_vec_y.to_owned(),
-                y_min,
-                y_max,
-            ));
-
-            xbox_state.left_joystick.x.value = nunchuck_x.convert_into(true);
-            xbox_state.left_joystick.y.value = nunchuck_y.convert_into(true);
-        }
-        _ => {}
-    }
-}
-
-async fn handle(devices: Vec<Device>) -> Result<()> {
-    // Start xbox gadget
-    // 1 controller
-    let fd = init_360_gadget_c(true, devices.len().try_into().unwrap());
-    // Wait 1 sec because C lib spam.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    let mut controller_states: Vec<XboxControllerState> = vec![];
-
-    for _i in 0..devices.len() {
-        controller_states.push(XboxControllerState::new());
-    }
-    loop {
-        for i in 0..devices.len() {
-            let device = &devices[i];
-            let controller_state = &mut controller_states[i];
-            let mut event_stream = device.events()?;
-
-            // Wait for the next event, which is either an event
-            // emitted by the device or a display update request.
-            let maybe_event = tokio::select! {
-                res = event_stream.try_next() => res?,
-                _ = tokio::time::sleep(Duration::from_millis(5)) => { // TODO: Make this a setting somehow
-                    continue;
-                },
-            };
-
-            let (event, _time) = match maybe_event {
-                Some(event) => event,
-                None => {
-                    // connection closed
-                    // close gadget and exit
-                    close_360_gadget_c(fd);
-                    break;
-                }
-            };
-
-            map_wii_event_to_xbox_state(event, controller_state);
-            // After sending state, sleep 1ms.
-            tokio::time::sleep(Duration::from_micros(900)).await;
-            // emit to gadget
-            let success = send_to_ep_c(
-                fd,
-                i.try_into().unwrap(),
-                controller_state.to_packet().as_ptr(),
-                20,
-            );
-            if !success {
-                // Probably crashed?
-                break;
-            }
-        }
-    }
-    return Ok(());
-}
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Create a monitor to enumerate connected Wii Remotes
     let mut monitor = Monitor::enumerate().unwrap();
     let address = monitor.try_next().await.unwrap().unwrap();
-    let mut wiiInput = XWiiInput::new(&address);
-    wiiInput.map_event(
-        Event::Key(Key::A, KeyState::Up),
-        OutputMapping::Button(GamepadButton::South),
+    let mut wii_input = XWiiInput::new(&address);
+
+    // Set mapping for rocket league
+    macro_rules! MapKeyToKey {
+        ($key: expr, $button: expr) => {
+            wii_input.map_event(
+                Event::Key($key, KeyState::Up),
+                OutputMapping::Button($button),
+            )
+        };
+    }
+
+    // Jump
+    MapKeyToKey!(Key::A, GamepadButton::South);
+    // Throttle
+    wii_input.map_event(
+        Event::Key(Key::B, KeyState::Up),
+        OutputMapping::Axis(GamepadAxis::RightTrigger),
+    );
+    // Menu
+    MapKeyToKey!(Key::Plus, GamepadButton::Start);
+    MapKeyToKey!(Key::Minus, GamepadButton::Select);
+    MapKeyToKey!(Key::Home, GamepadButton::Mode);
+    // Boost
+    MapKeyToKey!(Key::Down, GamepadButton::East);
+    // Ball cam
+    MapKeyToKey!(Key::One, GamepadButton::North);
+    // Dpad
+    MapKeyToKey!(Key::Up, GamepadButton::DPadUp);
+    MapKeyToKey!(Key::Left, GamepadButton::DPadLeft);
+    MapKeyToKey!(Key::Right, GamepadButton::DPadRight);
+    MapKeyToKey!(Key::Two, GamepadButton::DPadDown);
+
+    // Nunchuck
+    // Brake
+    wii_input.map_event(
+        Event::NunchukKey(NunchukKey::Z, KeyState::Up),
+        OutputMapping::Axis(GamepadAxis::LeftTrigger),
+    );
+    // Handbrake
+    wii_input.map_event(
+        Event::NunchukKey(NunchukKey::C, KeyState::Up),
+        OutputMapping::Button(GamepadButton::West),
     );
 
-    // connect(&address).await?;
+    macro_rules! EventNunchuckMove {
+        () => {
+            Event::NunchukMove {
+                x: 0,
+                y: 0,
+                x_acceleration: 0,
+                y_acceleration: 0,
+            }
+        };
+    }
+
+    wii_input.map_event(
+        EventNunchuckMove!(),
+        OutputMapping::Axis(controller_abs::GamepadAxis::LeftJoystickX),
+    );
+    wii_input.map_event(
+        EventNunchuckMove!(),
+        OutputMapping::Axis(controller_abs::GamepadAxis::LeftJoystickY),
+    );
+
+    let fd = init_360_gadget_c(true);
+    let mut controller_state = XboxControllerState::new();
+
+    loop {
+        let _res = wii_input.get_next_inputs().await;
+        controller_state.update_from_gamepad(wii_input.to_gamepad());
+
+        let success = send_to_ep1_c(fd, controller_state.to_packet().as_ptr(), 20);
+        if !success {
+            // Probably crashed?
+            break;
+        }
+        // After sending state, sleep 1ms.
+        tokio::time::sleep(Duration::from_micros(900)).await;
+    }
+
     Ok(())
 }
