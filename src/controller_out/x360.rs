@@ -1,4 +1,9 @@
-use crate::{controller_abs::{Axis, BitPackedButton, BitPackedButtons, JoystickState}, AxisNew, JoystickStateNew};
+use crate::{
+    controller_abs::{
+        Axis, BitPackedButton, BitPackedButtons, Gamepad, GamepadAxis, GamepadButton, JoystickState,
+    },
+    AxisNew, JoystickStateNew,
+};
 use std::{u8, vec};
 
 pub struct XboxButtonState {
@@ -95,14 +100,59 @@ impl XboxControllerState {
         }
     }
 
+    pub fn update_from_gamepad(&mut self, gamepad: &Gamepad) {
+        for (button, button_state) in &gamepad.buttons {
+            let val = button_state.to_owned();
+            match button {
+                GamepadButton::North => self.buttons.y.value = val,
+                GamepadButton::East => self.buttons.b.value = val,
+                GamepadButton::South => self.buttons.a.value = val,
+                GamepadButton::West => self.buttons.x.value = val,
+                GamepadButton::LeftShoulderButton => self.buttons.lb.value = val,
+                GamepadButton::RightShoulderButton => self.buttons.rb.value = val,
+                GamepadButton::LeftThumb => self.buttons.l3.value = val,
+                GamepadButton::RightThumb => self.buttons.r3.value = val,
+                GamepadButton::Start => self.buttons.start.value = val,
+                GamepadButton::Select => self.buttons.options.value = val,
+                GamepadButton::Mode => self.buttons.xbox.value = val,
+                GamepadButton::DPadUp => self.buttons.dpad_up.value = val,
+                GamepadButton::DPadDown => self.buttons.dpad_down.value = val,
+                GamepadButton::DPadLeft => self.buttons.dpad_left.value = val,
+                GamepadButton::DPadRight => self.buttons.dpad_right.value = val,
+            }
+        }
+        for (gamepad_axis, axis) in &gamepad.axes {
+            match gamepad_axis {
+                GamepadAxis::LeftJoystickX => {
+                    self.left_joystick.x.value = axis.convert_into(false);
+                }
+                GamepadAxis::LeftJoystickY => {
+                    self.left_joystick.y.value = axis.convert_into(false);
+                }
+                GamepadAxis::RightJoystickX => {
+                    self.right_joystick.x.value = axis.convert_into(false);
+                }
+                GamepadAxis::RightJoystickY => {
+                    self.right_joystick.y.value = axis.convert_into(false);
+                }
+                GamepadAxis::LeftTrigger => {
+                    self.left_trigger.value = axis.convert_into(false);
+                }
+                GamepadAxis::RightTrigger => {
+                    self.right_trigger.value = axis.convert_into(false);
+                }
+            }
+        }
+    }
+
     pub fn to_packet(&self) -> [u8; 20] {
         let mut packet = [0u8; 20];
         packet[0] = 0x00; // Report ID (0x00)
         packet[1] = 0x14; // Length (0x14)
         packet[2] = self.buttons.get_control_byte_2();
         packet[3] = self.buttons.get_control_byte_3();
-        packet[4] = self.left_trigger.convert_into(Some(false));
-        packet[5] = self.right_trigger.convert_into(Some(false));
+        packet[4] = self.left_trigger.convert_into(false);
+        packet[5] = self.right_trigger.convert_into(false);
         packet[6..8].copy_from_slice(
             &self
                 .left_joystick
