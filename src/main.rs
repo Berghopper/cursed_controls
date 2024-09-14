@@ -2,8 +2,8 @@ use futures_util::TryStreamExt;
 use std::thread::sleep;
 use std::time::Duration;
 use tokio;
-use xwiimote::{Address, Channels, Device, Monitor, Result};
 use xwiimote::events::{Event, Key, KeyState, NunchukKey};
+use xwiimote::{Address, Channels, Device, Monitor, Result};
 
 // Declare externals
 extern "C" {
@@ -164,6 +164,22 @@ async fn connect(address: &Address) -> Result<()> {
     Ok(())
 }
 
+fn nunchuck_to_xbox_joystick(nunchuck_axis: i32) -> i16 {
+    // Depending on the nunchuck, values range from about ~ -110 - 90 or -90 - 110
+    // So the working range is -90 - 90, with a +- deadzone of 10 around 0.
+    if nunchuck_axis >= -10 && nunchuck_axis <= 10 {
+        return 0; // Deadzone mapping
+    } else if nunchuck_axis < -10 {
+        // Map from [-90, -10] to [-32768, 0]
+        let mapped_value = ((nunchuck_axis + 10) as f32 / -80.0) * i16::MIN as f32;
+        return mapped_value as i16;
+    } else {
+        // Map from [10, 90] to [0, 32767]
+        let mapped_value = ((nunchuck_axis - 10) as f32 / 80.0) * i16::MAX as f32;
+        return mapped_value as i16;
+    }
+}
+
 fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerState) {
     // Example mapping for rocket league
     match event {
@@ -182,14 +198,17 @@ fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerStat
                 }
                 Key::Plus => xbox_state.buttons.start = button_state,
                 Key::Minus => xbox_state.buttons.options = button_state,
+
+                // boost
+                Key::Down => xbox_state.buttons.b = button_state,
+
+                // DPAD
                 Key::Up => xbox_state.buttons.dpad_up = button_state,
-                Key::Down => xbox_state.buttons.dpad_down = button_state,
                 Key::Left => xbox_state.buttons.dpad_left = button_state,
                 Key::Right => xbox_state.buttons.dpad_right = button_state,
+                Key::Two => xbox_state.buttons.dpad_down = button_state,
                 // Ball cam
                 Key::One => xbox_state.buttons.y = button_state,
-                // Handbreak
-                Key::Two => xbox_state.buttons.b = button_state,
                 _ => {}
             }
         }
@@ -204,7 +223,7 @@ fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerStat
                         u8::min_value()
                     };
                 }
-                // Boost
+                // Handbreak
                 NunchukKey::C => xbox_state.buttons.x = button_state,
             }
         }
@@ -214,8 +233,8 @@ fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerStat
             x_acceleration: _,
             y_acceleration: _,
         } => {
-            xbox_state.left_joystick.x = x.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-            xbox_state.left_joystick.y = y.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            xbox_state.left_joystick.x = nunchuck_to_xbox_joystick(x);
+            xbox_state.left_joystick.y = nunchuck_to_xbox_joystick(y);
         }
         _ => {}
     }
