@@ -175,6 +175,10 @@ impl Axis {
         &self.value
     }
 
+    pub fn get_normalized_value(&mut self) -> f64 {
+        return normalize(self.value, self.min, self.max, 0.0, 1.0);
+    }
+
     pub fn get_min(&mut self) -> &u64 {
         &self.min
     }
