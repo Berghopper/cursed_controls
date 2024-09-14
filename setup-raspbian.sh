@@ -53,7 +53,7 @@ cd cursed_controls
 # First build 360 emulation module
 git submodule sync
 git submodule update --init --recursive
-cd src/360-raw-gadget
+cd src/360-w-raw-gadget
 make clean && make
 
 # Get rust
