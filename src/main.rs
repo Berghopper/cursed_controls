@@ -131,10 +131,14 @@ async fn main() -> Result<()> {
 
     let fd = init_360_gadget_c(true, 1);
     let mut controller_state = XboxControllerState::new();
+    wii_input.prep_for_input_events();
 
     loop {
+        // println!("Getting inputs...");
         let _res = wii_input.get_next_inputs().await;
+        // println!("Updating state...");
         controller_state.update_from_gamepad(wii_input.to_gamepad());
+        // println!("A button: {}", controller_state.buttons.a.value);
 
         let success = send_to_ep_c(fd, 0, controller_state.to_packet().as_ptr(), 20);
         if !success {

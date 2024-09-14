@@ -1,7 +1,8 @@
-use std::{time::Duration};
+use std::time::Duration;
 
 use futures::TryStreamExt;
 use futures_util::StreamExt;
+use num_traits::ToPrimitive;
 use xwiimote::{
     events::{Event, KeyState},
     Address, Channels, Device, Monitor,
@@ -44,6 +45,11 @@ pub struct XWiiInput {
     gamepad: Gamepad,
     channels: Channels,
     mappings: Vec<ControllerMapping<Event>>,
+    nunchuck_x_min: i32,
+    nunchuck_x_max: i32,
+    nunchuck_y_min: i32,
+    nunchuck_y_max: i32,
+    deadzone_percentage: f64,
 }
 
 impl XWiiInput {
@@ -54,6 +60,11 @@ impl XWiiInput {
             // TODO: Make this into a ::new arg.
             channels: Channels::CORE | Channels::NUNCHUK,
             mappings: vec![],
+            nunchuck_x_min: 0,
+            nunchuck_x_max: 0,
+            nunchuck_y_min: 0,
+            nunchuck_y_max: 0,
+            deadzone_percentage: 0.05, // 5%
         }
     }
 
@@ -95,9 +106,9 @@ impl XWiiInput {
                         let output_axis = $self.gamepad.get_axis_ref(gamepad_axis.to_owned());
                         let output_value;
                         if button_down {
-                            output_value = output_axis.get_min().clone();
-                        } else {
                             output_value = output_axis.get_max().clone();
+                        } else {
+                            output_value = output_axis.get_min().clone();
                         };
                         output_axis.value = output_value;
                     }
@@ -128,26 +139,52 @@ impl XWiiInput {
                     x_acceleration: _,
                     y_acceleration: _,
                 } => {
-                    let from_min = -128;
-                    let from_max = 128;
+                    // println!("nunchuck X {}", x);
+                    // println!("nunchuck Y {}", y);
 
-                    let mut nunchuck_x = Axis::new(x, from_min, from_max);
-                    let mut nunchuck_y = Axis::new(y, from_min, from_max);
+                    if x < self.nunchuck_x_min {
+                        self.nunchuck_x_min = x;
+                    }
+                    if x > self.nunchuck_x_max {
+                        self.nunchuck_x_max = x;
+                    }
 
-                    // Specific deadzone to my controller
-                    // TODO; make cli that can set these ranges. / dynamically change it.
-                    let deadzone_vec_x = vec![-7..7, from_min..-87, 109..from_max];
-                    let deadzone_vec_y = vec![-7..7, from_min..-101, 93..from_max];
+                    if y < self.nunchuck_y_min {
+                        self.nunchuck_y_min = y;
+                    }
+                    if y > self.nunchuck_y_max {
+                        self.nunchuck_y_max = y;
+                    }
+
+                    let mut nunchuck_x = Axis::new(x, self.nunchuck_x_min, self.nunchuck_x_max);
+                    // println!("nunchuck X {}", nunchuck_x.get_normalized_value());
+                    let mut nunchuck_y = Axis::new(y, self.nunchuck_y_min, self.nunchuck_y_max);
+                    // println!("nunchuck Y {}", nunchuck_y.get_normalized_value());
+
+                    let deadzone_range_x = (self.deadzone_percentage
+                        * (self.nunchuck_x_min - self.nunchuck_x_max)
+                            .abs()
+                            .to_f64()
+                            .unwrap())
+                    .to_i32()
+                    .unwrap();
+                    let deadzone_range_y = (self.deadzone_percentage
+                        * (self.nunchuck_y_min - self.nunchuck_y_max)
+                            .abs()
+                            .to_f64()
+                            .unwrap())
+                    .to_i32()
+                    .unwrap();
 
                     nunchuck_x.set_deadzones(nunchuck_x.make_deadzone(
-                        deadzone_vec_x.to_owned(),
-                        from_min,
-                        from_max,
+                        vec![-deadzone_range_x..deadzone_range_x].to_owned(),
+                        self.nunchuck_x_min,
+                        self.nunchuck_x_max,
                     ));
                     nunchuck_y.set_deadzones(nunchuck_y.make_deadzone(
-                        deadzone_vec_y.to_owned(),
-                        from_min,
-                        from_max,
+                        vec![-deadzone_range_y..deadzone_range_y].to_owned(),
+                        self.nunchuck_y_min,
+                        self.nunchuck_y_max,
                     ));
 
                     match &controller_mapping.output {
@@ -227,11 +264,7 @@ impl ControllerInput for XWiiInput {
             }
         };
 
-        // TODO impl actual mappings;
         self.map_event_to_gamepad(event);
-        // map_wii_event_to_xbox_state(event, &mut controller_state);
         return Ok(true);
     }
 }
-
-// TODO implement connection and mappings
