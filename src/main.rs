@@ -6,8 +6,11 @@ use tokio;
 use xwiimote::events::{Event, Key, KeyState, NunchukKey};
 use xwiimote::{Address, Channels, Device, Monitor, Result};
 
+#[allow(dead_code)]
 mod controller_abs;
+#[allow(dead_code)]
 mod controller_out;
+#[allow(dead_code)]
 use controller_out::x360::XboxControllerState;
 
 // Declare externals
@@ -119,20 +122,27 @@ fn map_wii_event_to_xbox_state(event: Event, xbox_state: &mut XboxControllerStat
             x_acceleration: _,
             y_acceleration: _,
         } => {
-            let mut nunchuck_x = Axis::new(x, Some(-128), Some(128), None);
-            let mut nunchuck_y = Axis::new(y, Some(-128), Some(128), None);
+            let from_min = -128;
+            let from_max = 128;
 
-            let deadzone_vec = vec![-8..8, -128..-70, 70..128];
-            nunchuck_x.set_deadzones(Some(nunchuck_x.make_deadzone(
-                deadzone_vec.to_owned(),
-                -128,
-                128,
-            )));
-            nunchuck_y.set_deadzones(Some(nunchuck_y.make_deadzone(
-                deadzone_vec.to_owned(),
-                -128,
-                128,
-            )));
+            let mut nunchuck_x = Axis::new(x, from_min, from_max);
+            let mut nunchuck_y = Axis::new(y, from_min, from_max);
+
+            // Specific deadzone to my controller
+            // TODO; make cli that can set this..
+            let deadzone_vec_x = vec![-7..7, from_min..-87, 109..from_max];
+            let deadzone_vec_y = vec![-7..7, from_min..-101, 93..from_max];
+
+            nunchuck_x.set_deadzones(nunchuck_x.make_deadzone(
+                deadzone_vec_x.to_owned(),
+                from_min,
+                from_max,
+            ));
+            nunchuck_y.set_deadzones(nunchuck_y.make_deadzone(
+                deadzone_vec_y.to_owned(),
+                from_min,
+                from_max,
+            ));
 
             xbox_state.left_joystick.x.value = nunchuck_x.convert_into(Some(true));
             xbox_state.left_joystick.y.value = nunchuck_y.convert_into(Some(true));
@@ -149,7 +159,6 @@ async fn handle(device: &mut Device) -> Result<()> {
     let fd = init_360_gadget_c(true);
     let mut controller_state = XboxControllerState::new();
 
-    let mut gadget_open = true;
     loop {
         // Wait for the next event, which is either an event
         // emitted by the device or a display update request.
@@ -164,17 +173,11 @@ async fn handle(device: &mut Device) -> Result<()> {
             Some(event) => event,
             None => {
                 // connection closed
-                // close gadget
+                // close gadget and exit
                 close_360_gadget_c(fd);
-                gadget_open = false;
-                return Ok(());
+                break;
             }
         };
-
-        if !gadget_open {
-            // Exit.
-            break;
-        }
 
         map_wii_event_to_xbox_state(event, &mut controller_state);
         // After sending state, sleep 1ms.
