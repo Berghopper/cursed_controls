@@ -1,5 +1,7 @@
 use std::{
-    collections::HashMap, ops::{Div, Sub}, u64
+    collections::HashMap,
+    ops::{Div, Sub},
+    u64,
 };
 
 use num_traits::{Bounded, FromPrimitive, NumCast, ToPrimitive};
@@ -354,7 +356,6 @@ pub enum GamepadAxis {
     RightJoystickY,
 }
 
-
 pub struct Gamepad {
     pub buttons: HashMap<GamepadButton, bool>,
     pub axes: HashMap<GamepadAxis, Axis>,
@@ -377,18 +378,18 @@ impl Gamepad {
         Gamepad { buttons, axes }
     }
 
-    pub fn setButton(self: &mut Self, button: GamepadButton, value: bool) {
-         *self.buttons.get_mut(&button).unwrap() = value;
+    pub fn set_button(self: &mut Self, button: GamepadButton, value: bool) {
+        *self.buttons.get_mut(&button).unwrap() = value;
     }
 
-    pub fn getAxisRef(self: &mut Self, axis: GamepadAxis) -> &mut Axis {
-        return self.axes.get_mut(&axis).unwrap()
+    pub fn get_axis_ref(self: &mut Self, axis: GamepadAxis) -> &mut Axis {
+        return self.axes.get_mut(&axis).unwrap();
     }
 }
 
 pub enum InputType {
     Button,
-    Axis
+    Axis,
 }
 
 // Mappings
@@ -397,9 +398,12 @@ pub enum OutputMapping {
     Button(GamepadButton),
     Axis(GamepadAxis),
 }
-pub struct ControllerMapping<T> where T: Clone {
+pub struct ControllerMapping<T>
+where
+    T: Clone,
+{
     pub input: T,
-    pub output: OutputMapping
+    pub output: OutputMapping,
 }
 
 pub trait ControllerInput {
@@ -407,5 +411,5 @@ pub trait ControllerInput {
     fn to_gamepad<'a>(&'a mut self) -> &'a Gamepad;
     fn discover_all() -> Vec<Self::ControllerType>;
     fn prep_for_input_events(&mut self);
-    async fn get_next_inputs(&mut self)-> Result<bool, &'static str>;
+    async fn get_next_inputs(&mut self) -> Result<bool, &'static str>;
 }

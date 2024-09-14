@@ -1,14 +1,14 @@
-use std::{collections::HashMap, process::Output, time::Duration};
+use std::{time::Duration};
 
 use futures::TryStreamExt;
 use futures_util::StreamExt;
 use xwiimote::{
-    events::{Event, Key, KeyState},
+    events::{Event, KeyState},
     Address, Channels, Device, Monitor,
 };
 
 use crate::controller_abs::{
-    Axis, ControllerInput, ControllerMapping, Gamepad, GamepadAxis, InputType, OutputMapping,
+    Axis, ControllerInput, ControllerMapping, Gamepad, GamepadAxis, OutputMapping,
 };
 use futures::executor::block_on;
 
@@ -86,40 +86,13 @@ impl XWiiInput {
         });
     }
 
-    async fn map_next_event(&mut self, eventType: InputType, to_mapping: OutputMapping) {
-        // WIP...
-        // FIXME; Break after timeout or something similar.
-        loop {
-            match self.next_event().await {
-                Ok(event) => {
-                    match event {
-                        Event::Key(key, key_state) => {
-                            let button_down = !matches!(key_state, KeyState::Up);
-                            if !button_down {
-                                continue;
-                            }
-                            self.map_event(Event::Key(key, KeyState::Up), to_mapping.clone());
-                        }
-                        _ => {
-                            // not supported, ignore.
-                            // TODO: break somehow
-                        }
-                    }
-                }
-                _ => {
-                    // Do nothing.
-                }
-            }
-        }
-    }
-
     fn map_event_to_gamepad(&mut self, event: Event) {
         macro_rules! button_to_gamepad {
             ($self:expr, $controller_mapping_output:expr, $key_state:expr) => {
                 let button_down = !matches!($key_state, KeyState::Up);
                 match ($controller_mapping_output) {
                     OutputMapping::Axis(gamepad_axis) => {
-                        let output_axis = $self.gamepad.getAxisRef(gamepad_axis.to_owned());
+                        let output_axis = $self.gamepad.get_axis_ref(gamepad_axis.to_owned());
                         let output_value;
                         if button_down {
                             output_value = output_axis.get_min().clone();
@@ -130,18 +103,11 @@ impl XWiiInput {
                     }
                     OutputMapping::Button(gamepad_button) => {
                         self.gamepad
-                            .setButton(gamepad_button.to_owned(), button_down);
+                            .set_button(gamepad_button.to_owned(), button_down);
                     }
                 }
             };
         }
-
-        // TODO?;
-        // macro_rules! axis_to_gamepad {
-        //     () => {
-
-        //     };
-        // }
 
         for controller_mapping in &self.mappings {
             if XWiiEvent::new(controller_mapping.input) != XWiiEvent::new(event) {
@@ -159,8 +125,8 @@ impl XWiiInput {
                 Event::NunchukMove {
                     x,
                     y,
-                    x_acceleration,
-                    y_acceleration,
+                    x_acceleration: _,
+                    y_acceleration: _,
                 } => {
                     let from_min = -128;
                     let from_max = 128;
@@ -184,9 +150,9 @@ impl XWiiInput {
                         from_max,
                     ));
 
-                    match (&controller_mapping.output) {
+                    match &controller_mapping.output {
                         OutputMapping::Axis(gamepad_axis) => {
-                            let output_axis = self.gamepad.getAxisRef(gamepad_axis.to_owned());
+                            let output_axis = self.gamepad.get_axis_ref(gamepad_axis.to_owned());
                             match gamepad_axis {
                                 GamepadAxis::LeftJoystickX | GamepadAxis::RightJoystickX => {
                                     output_axis.value = nunchuck_x.convert_into(true)
@@ -240,17 +206,18 @@ impl ControllerInput for XWiiInput {
     }
 
     async fn get_next_inputs(&mut self) -> Result<bool, &'static str> {
-        let mut event_stream = self.device.events().unwrap();
-
-        let maybe_event = tokio::select! {
-            res = event_stream.try_next() => match res {
-                Ok(event) => event,
-                Err(_) => return Err("Error reading events.")
-            },
-            // TODO: Make this a setting somehow?
-            _ = tokio::time::sleep(Duration::from_millis(5)) => {
-                return Ok(false);
-            },
+        let maybe_event = {
+            let event_stream = &mut self.device.events().unwrap();
+            tokio::select! {
+                res = event_stream.try_next() => match res {
+                    Ok(event) => event,
+                    Err(_) => return Err("Error reading events.")
+                },
+                // TODO: Make this a setting somehow?
+                _ = tokio::time::sleep(Duration::from_millis(5)) => {
+                    return Ok(false);
+                },
+            }
         };
 
         let (event, _time) = match maybe_event {
@@ -261,6 +228,7 @@ impl ControllerInput for XWiiInput {
         };
 
         // TODO impl actual mappings;
+        self.map_event_to_gamepad(event);
         // map_wii_event_to_xbox_state(event, &mut controller_state);
         return Ok(true);
     }
