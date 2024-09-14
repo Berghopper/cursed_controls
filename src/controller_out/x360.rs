@@ -107,28 +107,28 @@ impl XboxControllerState {
             &self
                 .left_joystick
                 .x
-                .convert_into::<i16>(Some(false))
+                .convert_into::<i16, _>(false)
                 .to_le_bytes(),
         );
         packet[8..10].copy_from_slice(
             &self
                 .left_joystick
                 .y
-                .convert_into::<i16>(Some(false))
+                .convert_into::<i16, _>(false)
                 .to_le_bytes(),
         );
         packet[10..12].copy_from_slice(
             &self
                 .right_joystick
                 .x
-                .convert_into::<i16>(Some(false))
+                .convert_into::<i16, _>(false)
                 .to_le_bytes(),
         );
         packet[12..14].copy_from_slice(
             &self
                 .right_joystick
                 .y
-                .convert_into::<i16>(Some(false))
+                .convert_into::<i16, _>(false)
                 .to_le_bytes(),
         );
         packet

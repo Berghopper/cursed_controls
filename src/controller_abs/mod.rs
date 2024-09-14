@@ -210,13 +210,14 @@ impl Axis {
             .collect()
     }
 
-    pub fn convert_into<T>(&self, use_deadzones: Option<bool>) -> T
+    pub fn convert_into<T, D>(&self, use_deadzones: D) -> T
     where
         T: NormalizableNumber,
+        D: Into<Option<bool>>,
     {
         // Normalization step, usually between two different Axis systems
         // Apply deadzones if needed
-        if use_deadzones.unwrap_or(true) {
+        if use_deadzones.into().unwrap_or(true) {
             if let Some(deadzones) = &self.deadzones {
                 for deadzone in deadzones {
                     if deadzone.contains(&self.value) {
