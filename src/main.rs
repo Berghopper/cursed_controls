@@ -54,7 +54,7 @@ fn example_loop() {
         controller_state.left_joystick.x.value = 32760;
         controller_state.left_joystick.y.value = 32760;
         let packet = controller_state.to_packet();
-        send_to_ep_c(fd, 1, packet.as_ptr(), 20);
+        send_to_ep_c(fd, 0, packet.as_ptr(), 20);
     }
     // close_360_gadget_c(fd);
 }
@@ -129,14 +129,14 @@ async fn main() -> Result<()> {
         OutputMapping::Axis(controller_abs::GamepadAxis::LeftJoystickY),
     );
 
-    let fd = init_360_gadget_c(true);
+    let fd = init_360_gadget_c(true, 1);
     let mut controller_state = XboxControllerState::new();
 
     loop {
         let _res = wii_input.get_next_inputs().await;
         controller_state.update_from_gamepad(wii_input.to_gamepad());
 
-        let success = send_to_ep1_c(fd, controller_state.to_packet().as_ptr(), 20);
+        let success = send_to_ep_c(fd, 0, controller_state.to_packet().as_ptr(), 20);
         if !success {
             // Probably crashed?
             break;
