@@ -14,7 +14,7 @@ mod controller_in;
 mod controller_out;
 
 use controller_abs::GamepadButton;
-use controller_in::XWiiInput;
+use controller_in::{GilRsInput, XWiiInput};
 
 use controller_out::x360::XboxControllerState;
 
@@ -59,85 +59,115 @@ fn example_loop() {
     // close_360_gadget_c(fd);
 }
 
+// #[tokio::main(flavor = "current_thread")]
+// async fn main() -> Result<()> {
+//     // Create a monitor to enumerate connected Wii Remotes
+//     let mut monitor = Monitor::enumerate().unwrap();
+//     let address = monitor.try_next().await.unwrap().unwrap();
+//     let mut wii_input = XWiiInput::new(&address);
+
+//     // Set mapping for rocket league
+//     macro_rules! MapKeyToKey {
+//         ($key: expr, $button: expr) => {
+//             wii_input.map_event(
+//                 Event::Key($key, KeyState::Up),
+//                 OutputMapping::Button($button),
+//             )
+//         };
+//     }
+
+//     // Jump
+//     MapKeyToKey!(Key::A, GamepadButton::South);
+//     // Throttle
+//     wii_input.map_event(
+//         Event::Key(Key::B, KeyState::Up),
+//         OutputMapping::Axis(GamepadAxis::RightTrigger),
+//     );
+//     // Menu
+//     MapKeyToKey!(Key::Plus, GamepadButton::Start);
+//     MapKeyToKey!(Key::Minus, GamepadButton::Select);
+//     MapKeyToKey!(Key::Home, GamepadButton::Mode);
+//     // Boost
+//     MapKeyToKey!(Key::Down, GamepadButton::East);
+//     // Ball cam
+//     MapKeyToKey!(Key::One, GamepadButton::North);
+//     // Dpad
+//     MapKeyToKey!(Key::Up, GamepadButton::DPadUp);
+//     MapKeyToKey!(Key::Left, GamepadButton::DPadLeft);
+//     MapKeyToKey!(Key::Right, GamepadButton::DPadRight);
+//     MapKeyToKey!(Key::Two, GamepadButton::DPadDown);
+
+//     // Nunchuck
+//     // Brake
+//     wii_input.map_event(
+//         Event::NunchukKey(NunchukKey::Z, KeyState::Up),
+//         OutputMapping::Axis(GamepadAxis::LeftTrigger),
+//     );
+//     // Handbrake
+//     wii_input.map_event(
+//         Event::NunchukKey(NunchukKey::C, KeyState::Up),
+//         OutputMapping::Button(GamepadButton::West),
+//     );
+
+//     macro_rules! EventNunchuckMove {
+//         () => {
+//             Event::NunchukMove {
+//                 x: 0,
+//                 y: 0,
+//                 x_acceleration: 0,
+//                 y_acceleration: 0,
+//             }
+//         };
+//     }
+
+//     wii_input.map_event(
+//         EventNunchuckMove!(),
+//         OutputMapping::Axis(controller_abs::GamepadAxis::LeftJoystickX),
+//     );
+//     wii_input.map_event(
+//         EventNunchuckMove!(),
+//         OutputMapping::Axis(controller_abs::GamepadAxis::LeftJoystickY),
+//     );
+
+//     let fd = init_360_gadget_c(true, 1);
+//     let mut controller_state = XboxControllerState::new();
+//     wii_input.prep_for_input_events();
+
+//     loop {
+//         // println!("Getting inputs...");
+//         let _res = wii_input.get_next_inputs().await;
+//         // println!("Updating state...");
+//         controller_state.update_from_gamepad(wii_input.to_gamepad());
+//         // println!("A button: {}", controller_state.buttons.a.value);
+
+//         let success = send_to_ep_c(fd, 0, controller_state.to_packet().as_ptr(), 20);
+//         if !success {
+//             // Probably crashed?
+//             break;
+//         }
+//         // After sending state, sleep 1ms.
+//         tokio::time::sleep(Duration::from_micros(900)).await;
+//     }
+
+//     Ok(())
+// }
+
+
+
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    // Create a monitor to enumerate connected Wii Remotes
-    let mut monitor = Monitor::enumerate().unwrap();
-    let address = monitor.try_next().await.unwrap().unwrap();
-    let mut wii_input = XWiiInput::new(&address);
-
-    // Set mapping for rocket league
-    macro_rules! MapKeyToKey {
-        ($key: expr, $button: expr) => {
-            wii_input.map_event(
-                Event::Key($key, KeyState::Up),
-                OutputMapping::Button($button),
-            )
-        };
-    }
-
-    // Jump
-    MapKeyToKey!(Key::A, GamepadButton::South);
-    // Throttle
-    wii_input.map_event(
-        Event::Key(Key::B, KeyState::Up),
-        OutputMapping::Axis(GamepadAxis::RightTrigger),
-    );
-    // Menu
-    MapKeyToKey!(Key::Plus, GamepadButton::Start);
-    MapKeyToKey!(Key::Minus, GamepadButton::Select);
-    MapKeyToKey!(Key::Home, GamepadButton::Mode);
-    // Boost
-    MapKeyToKey!(Key::Down, GamepadButton::East);
-    // Ball cam
-    MapKeyToKey!(Key::One, GamepadButton::North);
-    // Dpad
-    MapKeyToKey!(Key::Up, GamepadButton::DPadUp);
-    MapKeyToKey!(Key::Left, GamepadButton::DPadLeft);
-    MapKeyToKey!(Key::Right, GamepadButton::DPadRight);
-    MapKeyToKey!(Key::Two, GamepadButton::DPadDown);
-
-    // Nunchuck
-    // Brake
-    wii_input.map_event(
-        Event::NunchukKey(NunchukKey::Z, KeyState::Up),
-        OutputMapping::Axis(GamepadAxis::LeftTrigger),
-    );
-    // Handbrake
-    wii_input.map_event(
-        Event::NunchukKey(NunchukKey::C, KeyState::Up),
-        OutputMapping::Button(GamepadButton::West),
-    );
-
-    macro_rules! EventNunchuckMove {
-        () => {
-            Event::NunchukMove {
-                x: 0,
-                y: 0,
-                x_acceleration: 0,
-                y_acceleration: 0,
-            }
-        };
-    }
-
-    wii_input.map_event(
-        EventNunchuckMove!(),
-        OutputMapping::Axis(controller_abs::GamepadAxis::LeftJoystickX),
-    );
-    wii_input.map_event(
-        EventNunchuckMove!(),
-        OutputMapping::Axis(controller_abs::GamepadAxis::LeftJoystickY),
-    );
-
     let fd = init_360_gadget_c(true, 1);
     let mut controller_state = XboxControllerState::new();
-    wii_input.prep_for_input_events();
+    
+    let mut gil_inps = GilRsInput::discover_all();
+    gil_inps[0].prep_for_input_events();
 
     loop {
         // println!("Getting inputs...");
-        let _res = wii_input.get_next_inputs().await;
+        let _res = gil_inps[0].get_next_inputs().await;
         // println!("Updating state...");
-        controller_state.update_from_gamepad(wii_input.to_gamepad());
+        controller_state.update_from_gamepad(gil_inps[0].to_gamepad());
         // println!("A button: {}", controller_state.buttons.a.value);
 
         let success = send_to_ep_c(fd, 0, controller_state.to_packet().as_ptr(), 20);

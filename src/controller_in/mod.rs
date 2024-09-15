@@ -9,9 +9,15 @@ use xwiimote::{
 };
 
 use crate::controller_abs::{
-    Axis, ControllerInput, ControllerMapping, Gamepad, GamepadAxis, OutputMapping,
+    Axis, ControllerInput, ControllerMapping, Gamepad, GamepadAxis, GamepadButton, OutputMapping,
 };
 use futures::executor::block_on;
+use gilrs::{
+    Axis as GilAxis, Button as GilButton, Gamepad as GilGamepad, GamepadId as GilGamepadId, Gilrs,
+};
+
+use gilrs::ev::state::AxisData as GilAxisData;
+use gilrs::ev::Code as GilCode;
 
 // TODO: use actix?
 
@@ -66,28 +72,6 @@ impl XWiiInput {
             nunchuck_y_max: 0,
             deadzone_percentage: 0.05, // 5%
         }
-    }
-
-    async fn next_event(&mut self) -> Result<Event, &'static str> {
-        let mut event_stream = self.device.events().unwrap();
-
-        let maybe_event = tokio::select! {
-            res = event_stream.try_next() => match res {
-                Ok(event) => event,
-                Err(_) => return Err("Error reading events")
-            },
-            _ = tokio::time::sleep(Duration::from_millis(5)) => {
-                return Err("Error, no event");
-            },
-        };
-
-        let (event, _time) = match maybe_event {
-            Some(event) => event,
-            None => {
-                return Err("Erorr, no event");
-            }
-        };
-        return Ok(event);
     }
 
     pub fn map_event(&mut self, event: Event, to_mapping: OutputMapping) {
@@ -265,6 +249,184 @@ impl ControllerInput for XWiiInput {
         };
 
         self.map_event_to_gamepad(event);
+        return Ok(true);
+    }
+}
+
+pub struct GilRsInput {
+    gamepad: Gamepad,
+    gil_rs: Gilrs,
+    gil_rs_device_id: GilGamepadId,
+    deadzone_percentage: f64,
+}
+
+impl GilRsInput {
+    pub fn new(gil_rs: Gilrs, gil_rs_device_id: GilGamepadId) -> GilRsInput {
+        GilRsInput {
+            gamepad: Gamepad::new(),
+            gil_rs,
+            gil_rs_device_id,
+            deadzone_percentage: 0.05, // 5%
+        }
+    }
+
+    fn get_gilrs_gamepad(&self) -> GilGamepad {
+        self.gil_rs.gamepad(self.gil_rs_device_id)
+    }
+
+    fn map_gilrs_to_gamepad(&mut self) {
+        let buttons = [
+            GilButton::South,
+            GilButton::East,
+            GilButton::North,
+            GilButton::West,
+            // GilButton::C,
+            // GilButton::Z,
+            GilButton::LeftTrigger,
+            // GilButton::LeftTrigger2,
+            GilButton::RightTrigger,
+            // GilButton::RightTrigger2,
+            GilButton::Select,
+            GilButton::Start,
+            GilButton::Mode,
+            GilButton::LeftThumb,
+            GilButton::RightThumb,
+            GilButton::DPadUp,
+            GilButton::DPadDown,
+            GilButton::DPadLeft,
+            GilButton::DPadRight,
+        ];
+        // Need to access this directly because of self borrow madness..
+        let gilrs_gamepad = self.gil_rs.gamepad(self.gil_rs_device_id);
+        for button in buttons.iter() {
+            let button_data = gilrs_gamepad.button_data(*button).unwrap();
+
+            let is_pressed = button_data.is_pressed() || button_data.is_repeating();
+
+            // Button to button
+            match button {
+                GilButton::South => self.gamepad.set_button(GamepadButton::South, is_pressed),
+                GilButton::East => self.gamepad.set_button(GamepadButton::East, is_pressed),
+                GilButton::North => self.gamepad.set_button(GamepadButton::North, is_pressed),
+                GilButton::West => self.gamepad.set_button(GamepadButton::West, is_pressed),
+                GilButton::LeftTrigger => self
+                    .gamepad
+                    .set_button(GamepadButton::LeftShoulderButton, is_pressed),
+                GilButton::RightTrigger => self
+                    .gamepad
+                    .set_button(GamepadButton::RightShoulderButton, is_pressed),
+                GilButton::Select => self.gamepad.set_button(GamepadButton::Select, is_pressed),
+                GilButton::Start => self.gamepad.set_button(GamepadButton::Start, is_pressed),
+                GilButton::Mode => self.gamepad.set_button(GamepadButton::Mode, is_pressed),
+                GilButton::LeftThumb => self
+                    .gamepad
+                    .set_button(GamepadButton::LeftThumb, is_pressed),
+                GilButton::RightThumb => self
+                    .gamepad
+                    .set_button(GamepadButton::RightThumb, is_pressed),
+                GilButton::DPadUp => self.gamepad.set_button(GamepadButton::DPadUp, is_pressed),
+                GilButton::DPadDown => self.gamepad.set_button(GamepadButton::DPadDown, is_pressed),
+                GilButton::DPadLeft => self.gamepad.set_button(GamepadButton::DPadLeft, is_pressed),
+                GilButton::DPadRight => self
+                    .gamepad
+                    .set_button(GamepadButton::DPadRight, is_pressed),
+                _ => (),
+            };
+        }
+        // Axis to axis
+        let axes = [
+            GilAxis::LeftStickX,
+            GilAxis::LeftStickY,
+            GilAxis::RightStickX,
+            GilAxis::RightStickY,
+        ];
+
+        let mut current_state: Vec<(GilCode, GilAxisData)> = vec![];
+        {
+            for (code, axis) in self.get_gilrs_gamepad().state().axes() {
+                current_state.push((code.clone(), axis.clone()));
+            }
+        }
+
+        for (code, axis) in current_state {
+            let in_axis = Axis::new(axis.value(), 0.0, 1.0);
+            let mut unknown_axis = true;
+            for ax in axes {
+                if (self.get_gilrs_gamepad().axis_code(ax)) != Some(code) {
+                    continue;
+                }
+
+                match ax {
+                    GilAxis::LeftStickX => {
+                        self.gamepad.get_axis_ref(GamepadAxis::LeftJoystickX).value =
+                            in_axis.convert_into(false);
+                    }
+                    GilAxis::LeftStickY => {
+                        self.gamepad.get_axis_ref(GamepadAxis::LeftJoystickY).value =
+                            in_axis.convert_into(false);
+                    }
+                    GilAxis::RightStickX => {
+                        self.gamepad.get_axis_ref(GamepadAxis::RightJoystickX).value =
+                            in_axis.convert_into(false);
+                    }
+                    GilAxis::RightStickY => {
+                        self.gamepad.get_axis_ref(GamepadAxis::RightJoystickY).value =
+                            in_axis.convert_into(false);
+                    }
+                    _ => {}
+                }
+                unknown_axis = false;
+                break;
+            }
+            if !unknown_axis {
+                break;
+            }
+            // Might be left/right trigger
+            match format!("{}", code).as_str() {
+                "ABS(9)" => {
+                    self.gamepad.get_axis_ref(GamepadAxis::RightTrigger).value =
+                        in_axis.convert_into(false);
+                }
+                "ABS(10)" => {
+                    self.gamepad.get_axis_ref(GamepadAxis::LeftTrigger).value =
+                        in_axis.convert_into(false);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+impl ControllerInput for GilRsInput {
+    type ControllerType = GilRsInput;
+
+    fn to_gamepad<'b>(&'b mut self) -> &'b Gamepad {
+        return &self.gamepad;
+    }
+
+    fn discover_all() -> Vec<Self::ControllerType> {
+        let gilrs = Gilrs::new().unwrap();
+
+        let mut inps: Vec<Self::ControllerType> = vec![];
+        for (_id, gamepad) in gilrs.gamepads() {
+            let gilrs_current_gamepad = Gilrs::new().unwrap();
+
+            inps.push(Self::ControllerType::new(
+                gilrs_current_gamepad,
+                gamepad.id(),
+            ));
+            println!("Detected!: {}/{}", gamepad.name(), gamepad.os_name());
+        }
+
+        return inps;
+    }
+
+    fn prep_for_input_events(&mut self) {
+        println!("GilRsInput connected: {}", self.get_gilrs_gamepad().name());
+    }
+
+    async fn get_next_inputs(&mut self) -> Result<bool, &'static str> {
+        self.map_gilrs_to_gamepad();
         return Ok(true);
     }
 }
