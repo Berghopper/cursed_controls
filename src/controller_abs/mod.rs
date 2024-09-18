@@ -102,6 +102,12 @@ fn test_normalization() {
 
     assert_eq!(norm_val_back, 0);
     assert_eq!(norm_val_back_macro, 0);
+
+    // Test again, but f64
+    assert_eq!(normalize::<f64, u8, _, _>(-0.9, -1.0, 1.0, None, None), 12);
+    assert_eq!(normalize::<f64, u8, _, _>(-1.0, -1.0, 1.0, None, None), 0);
+    assert_eq!(normalize::<f64, u8, _, _>(1.0, -1.0, 1.0, None, None), 255);
+    assert_eq!(normalize::<f64, u8, _, _>(0.9, -1.0, 1.0, None, None), 242);
 }
 
 // Values in axis are all u64, most likely controllers will have smaller sizes, so more easily convertible.
@@ -127,16 +133,19 @@ impl Axis {
     where
         T: NormalizableNumber,
     {
-        let min_val = normalize!(
-            min.into().unwrap_or_else(|| T::min_value()),
-            T::min_value(),
-            T::max_value()
-        );
-        let max_val = normalize!(
-            max.into().unwrap_or_else(|| T::max_value()),
-            T::min_value(),
-            T::max_value()
-        );
+        // let min_val = normalize!(
+        //     min.into().unwrap_or_else(|| T::min_value()),
+        //     T::min_value(),
+        //     T::max_value()
+        // );
+        // let max_val = normalize!(
+        //     max.into().unwrap_or_else(|| T::max_value()),
+        //     T::min_value(),
+        //     T::max_value()
+        // );
+
+        let min_val = u64::MIN;
+        let max_val = u64::MAX;
 
         Axis {
             value: normalize(from_value, min.into(), max.into(), min_val, max_val),
@@ -259,6 +268,16 @@ impl Axis {
 
         return normalize!(self.value, self.min, self.max);
     }
+
+    pub fn invert(&self) -> Self {
+        let inverted_value = self.min + (self.max - self.value);
+        Axis {
+            value: inverted_value,
+            min: self.min,
+            max: self.max,
+            deadzones: self.deadzones.clone(),
+        }
+    }
 }
 
 impl Default for Axis {
@@ -270,6 +289,13 @@ impl Default for Axis {
             deadzones: None,
         }
     }
+}
+
+#[test]
+fn test_axis() {
+    assert_eq!(Axis::new::<u8, _>(127, u8::MIN, u8::MAX).convert_into::<u8, _>(false), 127);
+    assert_eq!(Axis::new::<u8, _>(50, 0, 100).convert_into::<u8, _>(false), 127);
+    assert_eq!(Axis::new(0.0, -1.0, 1.0).convert_into::<u8, _>(false), 127);
 }
 
 #[derive(Clone)]

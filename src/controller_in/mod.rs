@@ -13,7 +13,8 @@ use crate::controller_abs::{
 };
 use futures::executor::block_on;
 use gilrs::{
-    Axis as GilAxis, Button as GilButton, Gamepad as GilGamepad, GamepadId as GilGamepadId, Gilrs,
+    Axis as GilAxis, Button as GilButton, Event as GilEvent, Gamepad as GilGamepad,
+    GamepadId as GilGamepadId, Gilrs,
 };
 
 use gilrs::ev::state::AxisData as GilAxisData;
@@ -296,12 +297,16 @@ impl GilRsInput {
             GilButton::DPadLeft,
             GilButton::DPadRight,
         ];
-        // Need to access this directly because of self borrow madness..
-        let gilrs_gamepad = self.gil_rs.gamepad(self.gil_rs_device_id);
-        for button in buttons.iter() {
-            let button_data = gilrs_gamepad.button_data(*button).unwrap();
+        // We also NEED to consume events here, otherwise data is not filled properly on the gamepad
+        while let Some(GilEvent { id, event, time }) = self.gil_rs.next_event() {
+            // FIXME: gamepad state seems inconsistent?/mappings might be weird...
+            println!("{:?} New event from {}: {:?}", time, id, event);
+        }
 
-            let is_pressed = button_data.is_pressed() || button_data.is_repeating();
+        for button in buttons.iter() {
+            let gilrs_gamepad = self.get_gilrs_gamepad();
+
+            let is_pressed = gilrs_gamepad.is_pressed(button.clone());
 
             // Button to button
             match button {
@@ -339,6 +344,8 @@ impl GilRsInput {
             GilAxis::LeftStickY,
             GilAxis::RightStickX,
             GilAxis::RightStickY,
+            GilAxis::RightZ,
+            GilAxis::LeftZ,
         ];
 
         let mut current_state: Vec<(GilCode, GilAxisData)> = vec![];
@@ -348,20 +355,23 @@ impl GilRsInput {
             }
         }
 
+        // Axis mapping is pretty weird...
         for (code, axis) in current_state {
-            let in_axis = Axis::new(axis.value(), 0.0, 1.0);
-            let mut unknown_axis = true;
+            let in_axis = Axis::new(axis.value(), -1.0, 1.0);
+            let mut known_axis = false;
             for ax in axes {
                 if (self.get_gilrs_gamepad().axis_code(ax)) != Some(code) {
-                    continue;
+                    break;
                 }
 
                 match ax {
                     GilAxis::LeftStickX => {
+                        known_axis = true;
                         self.gamepad.get_axis_ref(GamepadAxis::LeftJoystickX).value =
                             in_axis.convert_into(false);
                     }
                     GilAxis::LeftStickY => {
+                        known_axis = true;
                         self.gamepad.get_axis_ref(GamepadAxis::LeftJoystickY).value =
                             in_axis.convert_into(false);
                     }
@@ -373,25 +383,54 @@ impl GilRsInput {
                         self.gamepad.get_axis_ref(GamepadAxis::RightJoystickY).value =
                             in_axis.convert_into(false);
                     }
+                    GilAxis::LeftZ => {
+                        self.gamepad.get_axis_ref(GamepadAxis::RightJoystickX).value =
+                            in_axis.convert_into(false);
+                    }
+                    GilAxis::RightZ => {
+                        self.gamepad.get_axis_ref(GamepadAxis::RightJoystickY).value =
+                            in_axis.invert().convert_into(false);
+                    }
+
                     _ => {}
                 }
-                unknown_axis = false;
-                break;
             }
-            if !unknown_axis {
-                break;
-            }
-            // Might be left/right trigger
-            match format!("{}", code).as_str() {
-                "ABS(9)" => {
-                    self.gamepad.get_axis_ref(GamepadAxis::RightTrigger).value =
-                        in_axis.convert_into(false);
+            if !known_axis {
+                match format!("{}", code).as_str() {
+                    // Right trigger
+                    "ABS(9)" => {
+                        self.gamepad.get_axis_ref(GamepadAxis::RightTrigger).value =
+                            in_axis.convert_into(false);
+                    }
+                    // Left trigger
+                    "ABS(10)" => {
+                        self.gamepad.get_axis_ref(GamepadAxis::LeftTrigger).value =
+                            in_axis.convert_into(false);
+                    }
+                    // Left stick
+                    "ABS(0)" => {
+                        self.gamepad.get_axis_ref(GamepadAxis::LeftJoystickX).value =
+                            in_axis.convert_into(false);
+                    }
+                    "ABS(1)" => {
+                        self.gamepad.get_axis_ref(GamepadAxis::LeftJoystickY).value =
+                            in_axis.convert_into(false);
+                    }
+                    // Right stick
+                    "ABS(2)" => {
+                        self.gamepad.get_axis_ref(GamepadAxis::RightJoystickX).value =
+                            in_axis.convert_into(false);
+                    }
+                    "ABS(5)" => {
+                        // For some reason this is inverted..
+                        self.gamepad.get_axis_ref(GamepadAxis::RightJoystickY).value =
+                            in_axis.invert().convert_into(false);
+                    }
+                    _ => {
+                        // FIXME: turned off for spam, some axes seem duplicated?...
+                        println!("Unknown axis!: {}/{}", code, axis.value());
+                    }
                 }
-                "ABS(10)" => {
-                    self.gamepad.get_axis_ref(GamepadAxis::LeftTrigger).value =
-                        in_axis.convert_into(false);
-                }
-                _ => {}
             }
         }
     }
@@ -415,7 +454,12 @@ impl ControllerInput for GilRsInput {
                 gilrs_current_gamepad,
                 gamepad.id(),
             ));
-            println!("Detected!: {}/{}", gamepad.name(), gamepad.os_name());
+            println!(
+                "Detected!: {}/{}/{}",
+                gamepad.id(),
+                gamepad.name(),
+                gamepad.os_name()
+            );
         }
 
         return inps;
