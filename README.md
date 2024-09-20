@@ -1,19 +1,33 @@
 # cursed_controls
-Controller to virtual controller mapping.
+Controller to virtual controller mapping. Essentially turning any OTG capable SBC into a wireless controller receiver/input converter.
 
-For now;
-wii remote -> virtual xbox controller
+E.g.:
+- wii remote + nunchuck & PS5 controlelr -> virtual xbox controller
 
-# pi0 - wii remote
+Note: This project is still in early development and probably pretty broken for now.
 
-For setup, take a look at the `init-raspbian.sh`, `setup-raspbian.sh` and `run-raspbian.sh` scripts.
-These should work out of the box for the pi0.
+## Raspberry pi setup
 
-## But why?
+Take a look at the install guide: [SetupRaspbian.md](SetupRaspbian.md).
+
+## Why:
 
 An Xbox controller is really well supported on many devices, usually drivers pre-exist for it.
 Connecting a Wii remote to a device is a bit more tricky, to say the least.
 
-## I still don't get why
+## Capabilities
 
-I don't either, but I'm doing it anyway.
+Input controllers:
+
+- Wii mote + nunchuck
+- Any controller supported by [GilRs](https://docs.rs/gilrs/latest/gilrs/)
+
+### TBA:
+
+- Debugging of GilRs/refactoring
+- Adding a proper mapping format w/ json
+- Basic CLI for building a mapping
+- Webinterface for setup?
+- Axis to button mapping?
+- Rumble support
+- Other 'fancy' settings (leds etc.)

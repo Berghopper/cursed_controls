@@ -447,8 +447,22 @@ impl ControllerInput for GilRsInput {
         let gilrs = Gilrs::new().unwrap();
 
         let mut inps: Vec<Self::ControllerType> = vec![];
+
+        macro_rules! ignore_controller {
+            ($gamepad:expr, $s:expr) => {
+                if $gamepad.name().contains($s) | $gamepad.os_name().contains($s) {
+                    continue;
+                }
+            }
+        }
+
         for (_id, gamepad) in gilrs.gamepads() {
             let gilrs_current_gamepad = Gilrs::new().unwrap();
+            
+            // e.g. Nintendo Wii Remote Nunchuk
+            ignore_controller!(gamepad, "Wii");
+            ignore_controller!(gamepad, "Nunchuk");
+            
 
             inps.push(Self::ControllerType::new(
                 gilrs_current_gamepad,
