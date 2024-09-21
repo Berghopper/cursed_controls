@@ -182,23 +182,24 @@ fn cli_gamepads_overview(inps: Vec<InputType>) {
     }
 }
 
-enum InputType<'a> {
+enum InputType {
     WiiInput(XWiiInput),
-    GilInput(GilRsInput<'a>),
+    GilInput(GilRsInput),
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let mut inps = vec![];
     let wii_handler = XWiiHandler::new();
-    let mut gilrs_handler = Rc::new(RefCell::new(GilRsHandler::new()));
+    let gilrs_handler = Rc::new(RefCell::new(GilRsHandler::new()));
 
     for inp in wii_handler.discover_all() {
         inps.push(InputType::WiiInput(inp));
     }
 
-    let gilrs_handler_b = gilrs_handler.borrow();
-    for inp in gilrs_handler_b.discover_all(Rc::clone(gilrs_handler)) {
+    let gilrs_handler_b = gilrs_handler.borrow_mut();
+    
+    for inp in gilrs_handler_b.discover_all(Rc::clone(&gilrs_handler)) {
         inps.push(InputType::GilInput(inp));
     }
 

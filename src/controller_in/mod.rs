@@ -1,4 +1,4 @@
-use std::{borrow::{Borrow, BorrowMut}, cell::Ref, time::{Duration, SystemTime}};
+use std::{cell::Ref, time::{Duration, SystemTime}};
 
 use futures::TryStreamExt;
 use futures_util::StreamExt;
@@ -320,7 +320,7 @@ impl GilRsHandler {
         }
     }
 
-    pub fn discover_all<'a>(&'a self, self_ref: Rc<RefCell<&'a mut GilRsHandler>>) -> Box<dyn Iterator<Item = GilRsInput<'a>> + 'a> {
+    pub fn discover_all(&self, self_ref: Rc<RefCell<GilRsHandler>>) -> Box<dyn Iterator<Item = GilRsInput>> {
         let mut inps = Vec::new();
 
         macro_rules! ignore_controller {
@@ -361,15 +361,15 @@ impl GilRsHandler {
 //     }
 // }
 
-pub struct GilRsInput<'a> {
-    gilrs_handler: Rc<RefCell<&'a mut GilRsHandler>>,
+pub struct GilRsInput {
+    gilrs_handler: Rc<RefCell<GilRsHandler>>,
     gamepad: Gamepad,
     pub id: GilGamepadId,
     deadzone_percentage: f64,
 }
 
-impl<'a> GilRsInput<'a> {
-    pub fn new(gilrs_handler: Rc<RefCell<&'a mut GilRsHandler>>, id: GilGamepadId) -> GilRsInput<'a> {
+impl GilRsInput {
+    pub fn new(gilrs_handler: Rc<RefCell<GilRsHandler>>, id: GilGamepadId) -> GilRsInput {
         GilRsInput {
             gilrs_handler,
             gamepad: Gamepad::new(),
@@ -379,9 +379,11 @@ impl<'a> GilRsInput<'a> {
     }
 
     fn get_inputs_for_mapping(&mut self) {
-        let y = self.gilrs_handler.get_mut();
-        let x = y.dequeue_event_queue(self.id);
-        // FIXME / WIP
+        
+        let mut a = self.gilrs_handler.borrow_mut();
+
+        a.dequeue_event_queue(self.id);
+
     }
 
     pub fn get_gilrs(&self) -> Ref<'_, Gilrs> {
@@ -428,14 +430,14 @@ impl<'a> GilRsInput<'a> {
 //     }
 // }
 
-impl<'a> ControllerInput for GilRsInput<'a> {
-    type ControllerType = GilRsInput<'a> where Self: 'a;
+// impl<'a> ControllerInput for GilRsInput<'a> {
+//     type ControllerType = GilRsInput<'a> where Self: 'a;
 
-    fn to_gamepad<'b>(&'b mut self) -> &'b Gamepad {
-        return &self.gamepad;
-    }
+//     fn to_gamepad<'b>(&'b mut self) -> &'b Gamepad {
+//         return &self.gamepad;
+//     }
 
-    fn prep_for_input_events(&mut self) {
-        println!("GilRsInput connected: {}", self.get_gilrs().gamepad(self.id).name());
-    }
-}
+//     fn prep_for_input_events(&mut self) {
+//         println!("GilRsInput connected: {}", self.get_gilrs().gamepad(self.id).name());
+//     }
+// }
