@@ -111,6 +111,7 @@ fn test_normalization() {
 }
 
 // Values in axis are all u64, most likely controllers will have smaller sizes, so more easily convertible.
+#[derive(Clone, Debug)]
 pub struct Axis {
     pub value: u64,
     min: u64,
@@ -429,11 +430,12 @@ pub enum InputType {
 }
 
 // Mappings
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum OutputMapping {
     Button(GamepadButton),
     Axis(GamepadAxis),
 }
+
 pub struct ControllerMapping<T>
 where
     T: Clone,
@@ -442,15 +444,8 @@ where
     pub output: OutputMapping,
 }
 
-pub trait ControllerRetriever {
-    type ControllerType<'a>
-    where
-        Self: 'a;
-
-    fn discover_all<'a>(&'a self) -> Box<dyn Iterator<Item = Self::ControllerType<'a>> + 'a>;
-}
 pub trait ControllerInput {
     type ControllerType;
-    fn to_gamepad<'a>(&'a mut self) -> &'a Gamepad;
+    fn to_gamepad(&mut self) -> &Gamepad;
     fn prep_for_input_events(&mut self);
 }

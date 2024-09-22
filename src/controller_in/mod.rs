@@ -1,16 +1,19 @@
-use std::{cell::Ref, time::{Duration, SystemTime}};
+use std::{
+    cell::Ref,
+    time::{Duration, SystemTime},
+    vec,
+};
 
 use futures::TryStreamExt;
 use futures_util::StreamExt;
 use num_traits::ToPrimitive;
 use xwiimote::{
-    events::{Event, KeyState},
+    events::{Event as WiiEvent, KeyState},
     Address, Channels, Device, Monitor,
 };
 
 use crate::controller_abs::{
-    Axis, ControllerInput, ControllerMapping, ControllerRetriever, Gamepad, GamepadAxis,
-    GamepadButton, OutputMapping,
+    Axis, ControllerInput, ControllerMapping, Gamepad, GamepadAxis, GamepadButton, OutputMapping,
 };
 use futures::executor::block_on;
 use gilrs::{
@@ -20,18 +23,17 @@ use gilrs::{
 
 use gilrs::ev::state::AxisData as GilAxisData;
 use gilrs::ev::Code as GilCode;
-use std::collections::{HashMap, VecDeque};
 use std::cell::RefCell;
-use std::ops::Deref;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 // TODO: use actix?
 
-struct XWiiEvent(Event);
+struct XWiiEvent(WiiEvent);
 
 impl XWiiEvent {
     // Constructor to wrap an Event into MyEvent
-    fn new(event: xwiimote::events::Event) -> Self {
+    fn new(event: WiiEvent) -> Self {
         XWiiEvent(event)
     }
 }
@@ -39,24 +41,16 @@ impl XWiiEvent {
 impl PartialEq for XWiiEvent {
     fn eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
-            (Event::Key(key1, _), Event::Key(key2, _)) => {
+            (WiiEvent::Key(key1, _), WiiEvent::Key(key2, _)) => {
                 std::mem::discriminant(key1) == std::mem::discriminant(key2)
             }
-            (Event::NunchukKey(key1, _), Event::NunchukKey(key2, _)) => {
+            (WiiEvent::NunchukKey(key1, _), WiiEvent::NunchukKey(key2, _)) => {
                 std::mem::discriminant(key1) == std::mem::discriminant(key2)
             }
-            (Event::NunchukMove { .. }, Event::NunchukMove { .. }) => true,
+            (WiiEvent::NunchukMove { .. }, WiiEvent::NunchukMove { .. }) => true,
             // FIXME: Add others...
             _ => false,
         }
-    }
-}
-
-pub struct XWiiHandler {}
-
-impl XWiiHandler {
-    pub fn new() -> XWiiHandler {
-        XWiiHandler {}
     }
 }
 
@@ -64,7 +58,7 @@ pub struct XWiiInput {
     device: Device,
     gamepad: Gamepad,
     channels: Channels,
-    mappings: Vec<ControllerMapping<Event>>,
+    mappings: Vec<ControllerMapping<WiiEvent>>,
     nunchuck_x_min: i32,
     nunchuck_x_max: i32,
     nunchuck_y_min: i32,
@@ -88,14 +82,14 @@ impl XWiiInput {
         }
     }
 
-    pub fn map_event(&mut self, event: Event, to_mapping: OutputMapping) {
+    pub fn map_event(&mut self, event: WiiEvent, to_mapping: OutputMapping) {
         self.mappings.push(ControllerMapping {
             input: event,
             output: to_mapping.clone(),
         });
     }
 
-    fn map_event_to_gamepad(&mut self, event: Event) {
+    fn map_event_to_gamepad(&mut self, event: WiiEvent) {
         macro_rules! button_to_gamepad {
             ($self:expr, $controller_mapping_output:expr, $key_state:expr) => {
                 let button_down = !matches!($key_state, KeyState::Up);
@@ -125,13 +119,13 @@ impl XWiiInput {
             // If we have found our input key, we still need to do some basic matching to ensure correct mapping.
             // E.g. button -> Axis is a little weird.
             match event {
-                Event::Key(_key, key_state) => {
+                WiiEvent::Key(_key, key_state) => {
                     button_to_gamepad!(self, &controller_mapping.output, key_state);
                 }
-                Event::NunchukKey(_key, key_state) => {
+                WiiEvent::NunchukKey(_key, key_state) => {
                     button_to_gamepad!(self, &controller_mapping.output, key_state);
                 }
-                Event::NunchukMove {
+                WiiEvent::NunchukMove {
                     x,
                     y,
                     x_acceleration: _,
@@ -240,19 +234,15 @@ impl XWiiInput {
         self.map_event_to_gamepad(event);
         return Ok(true);
     }
-}
 
-impl ControllerRetriever for XWiiHandler {
-    type ControllerType<'a> = XWiiInput;
-
-    fn discover_all<'a>(&'a self) -> Box<dyn Iterator<Item = Self::ControllerType<'a>> + 'a> {
+    pub fn discover_all() -> Box<dyn Iterator<Item = Self>> {
         let monitor = Monitor::enumerate().unwrap();
 
         let addresses: Vec<_> = block_on(async { monitor.collect().await });
 
-        let mut inps: Vec<Self::ControllerType<'a>> = vec![];
+        let mut inps: Vec<Self> = vec![];
         for address in addresses {
-            inps.push(Self::ControllerType::new(&address.unwrap()));
+            inps.push(Self::new(&address.unwrap()));
         }
 
         Box::new(inps.into_iter())
@@ -320,7 +310,10 @@ impl GilRsHandler {
         }
     }
 
-    pub fn discover_all(&self, self_ref: Rc<RefCell<GilRsHandler>>) -> Box<dyn Iterator<Item = GilRsInput>> {
+    pub fn discover_all(
+        &self,
+        self_ref: Rc<RefCell<GilRsHandler>>,
+    ) -> Box<dyn Iterator<Item = GilRsInput>> {
         let mut inps = Vec::new();
 
         macro_rules! ignore_controller {
@@ -349,22 +342,17 @@ impl GilRsHandler {
     }
 }
 
-// struct GilGamepadGuard<'c> {
-//     guard: Ref<'c, GilGamepad<'c>>,
-// }
-
-// impl<'c> Deref for GilGamepadGuard<'c> {
-//     type Target = GilGamepad<'c>;
-
-//     fn deref(&self) -> &GilGamepad<'c> {
-//         &self.guard
-//     }
-// }
+#[derive(Copy, Clone, Debug)]
+pub enum GilInputs {
+    Axis((GilAxis, GilCode)),
+    Button((GilButton, GilCode)),
+}
 
 pub struct GilRsInput {
     gilrs_handler: Rc<RefCell<GilRsHandler>>,
     gamepad: Gamepad,
     pub id: GilGamepadId,
+    mappings: Vec<ControllerMapping<GilInputs>>,
     deadzone_percentage: f64,
 }
 
@@ -374,16 +362,78 @@ impl GilRsInput {
             gilrs_handler,
             gamepad: Gamepad::new(),
             id,
+            mappings: vec![],
             deadzone_percentage: 0.05, // 5%
         }
     }
 
-    fn get_inputs_for_mapping(&mut self) {
-        
-        let mut a = self.gilrs_handler.borrow_mut();
+    pub fn get_inputs_for_mapping<O: Into<Option<bool>>, O2: Into<Option<Vec<GilInputs>>>>(
+        &self,
+        duration_secs: u64,
+        listen_for_gyro_opt: O,
+        ignore_axes_opt: O2,
+    ) -> Vec<GilInputs> {
+        let listen_for_gyro = listen_for_gyro_opt.into().unwrap_or(false);
+        let ignore_axes: Vec<GilInputs> = ignore_axes_opt.into().unwrap_or(vec![]);
+        let mut gilrs_handler_ref = self.gilrs_handler.borrow_mut();
+        let outputmappings = vec![];
 
-        a.dequeue_event_queue(self.id);
+        let mut tracky = 0;
+        while tracky <= duration_secs {
+            let mut dequeued_evs = gilrs_handler_ref.dequeue_event_queue(self.id);
+            dequeued_evs.sort_by_key(|k| k.0);
 
+            let mut outputmappings = vec![];
+            'ev_loop: for ev in dequeued_evs {
+                match ev.1 {
+                    GilEventType::AxisChanged(gil_axis, _val, code) => {
+                        for ignore_axis in &ignore_axes {
+                            match ignore_axis {
+                                &GilInputs::Axis(ignore) => {
+                                    if gil_axis == ignore.0 && code == ignore.1 {
+                                        // gyro! ignore.
+                                        // FIXME: add support.
+                                        continue 'ev_loop;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        // Axis is always -1.0 - 1.0
+                        outputmappings.push(GilInputs::Axis((gil_axis, code)));
+                    }
+                    GilEventType::ButtonPressed(button, code)
+                    | GilEventType::ButtonRepeated(button, code)
+                    | GilEventType::ButtonReleased(button, code) => {
+                        if listen_for_gyro {
+                            // ignore
+                            break;
+                        }
+                        outputmappings.push(GilInputs::Button((button, code)));
+                    }
+                    GilEventType::ButtonChanged(button, _val, code) => {
+                        // Potentially an axis?... Unsure what do with that, for now let's just map this as a regular button...
+                        if listen_for_gyro {
+                            // ignore
+                            break;
+                        }
+                        outputmappings.push(GilInputs::Button((button, code)));
+                    }
+                    _ => {
+                        // TODO: disconnects
+                    }
+                }
+            }
+            if listen_for_gyro {
+                println!("Listening for accelerometer/gyro data, move your controller around gently ({}s)", tracky);
+            } else {
+                println!("Waiting for input ({}s)", tracky);
+            }
+
+            std::thread::sleep(Duration::from_secs(1));
+            tracky += 1;
+        }
+        outputmappings
     }
 
     pub fn get_gilrs(&self) -> Ref<'_, Gilrs> {
@@ -391,53 +441,17 @@ impl GilRsInput {
     }
 }
 
-// impl ControllerRetriever for GilRsHandler {
-//     type ControllerType<'a> = GilRsInput<'a> where Self: 'a;
+impl ControllerInput for GilRsInput {
+    type ControllerType = GilRsInput;
 
-//     fn discover_all<'a>(&'a self) -> Box<dyn Iterator<Item = Self::ControllerType<'a>> + 'a> {
-//         let mut inps = Vec::new();
+    fn to_gamepad(&mut self) -> &Gamepad {
+        return &self.gamepad;
+    }
 
-//         macro_rules! ignore_controller {
-//             ($gamepad:expr, $s:expr) => {
-//                 if $gamepad.name().contains($s) | $gamepad.os_name().contains($s) {
-//                     continue;
-//                 }
-//             };
-//         }
-//         let selfref: RefCell<&mut GilRsHandler> = RefCell::new(self);
-//         let y;
-//         {
-//             let borrowed_self = selfref.borrow();
-//         }
-
-//         let y = borrowed_self.gilrs.gamepads();
-
-//         for (_id, gamepad) in y {
-//             // e.g. Nintendo Wii Remote Nunchuk
-//             ignore_controller!(gamepad, "Wii");
-//             ignore_controller!(gamepad, "Nunchuk");
-
-//             inps.push(Self::ControllerType::new(selfr, gamepad.id()));
-//             // println!(
-//             //     "Detected!: {}/{}/{}",
-//             //     gamepad.id(),
-//             //     gamepad.name(),
-//             //     gamepad.os_name()
-//             // );
-//         }
-
-//         Box::new(inps.into_iter())
-//     }
-// }
-
-// impl<'a> ControllerInput for GilRsInput<'a> {
-//     type ControllerType = GilRsInput<'a> where Self: 'a;
-
-//     fn to_gamepad<'b>(&'b mut self) -> &'b Gamepad {
-//         return &self.gamepad;
-//     }
-
-//     fn prep_for_input_events(&mut self) {
-//         println!("GilRsInput connected: {}", self.get_gilrs().gamepad(self.id).name());
-//     }
-// }
+    fn prep_for_input_events(&mut self) {
+        println!(
+            "GilRsInput connected: {}",
+            self.get_gilrs().gamepad(self.id).name()
+        );
+    }
+}

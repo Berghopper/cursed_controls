@@ -1,14 +1,14 @@
-use controller_abs::{ControllerInput, ControllerRetriever, Gamepad, GamepadAxis, OutputMapping};
+use controller_abs::{ControllerInput, Gamepad, GamepadAxis, OutputMapping};
 use futures_util::TryStreamExt;
+use std::cell::RefCell;
 use std::io::{self, Write};
+use std::rc::Rc;
 use std::thread::sleep;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tokio;
 use xwiimote::events::{Event, Key, KeyState, NunchukKey};
 use xwiimote::{Monitor, Result};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 #[allow(dead_code)]
 mod controller_abs;
@@ -18,7 +18,7 @@ mod controller_in;
 mod controller_out;
 
 use controller_abs::GamepadButton;
-use controller_in::{GilRsHandler, GilRsInput, XWiiHandler, XWiiInput};
+use controller_in::{GilInputs, GilRsHandler, GilRsInput, XWiiInput};
 
 use controller_out::x360::XboxControllerState;
 
@@ -83,20 +83,60 @@ fn get_user_input(prompt: &str) -> String {
     retval
 }
 
-fn cli_map_user_input(inp: &InputType, outputmapping: OutputMapping) {
+fn cli_map_user_input(inp: &mut InputType, outputmapping: OutputMapping) {
     // First await input
-    match &inp {
-        &InputType::WiiInput(_wii_inp) => {
+    match inp {
+        InputType::WiiInput(_wii_inp) => {
             // FIXME
         }
-        &InputType::GilInput(gil_inp) => {
-            // FIXME
+        InputType::GilInput(gil_inp) => {
+            // We have no idea which axis's might be gyro, so let's capture it seperately.
+            let gyro_inputs = gil_inp.get_inputs_for_mapping(10, true, None);
+            let inps = gil_inp.get_inputs_for_mapping(10, false, gyro_inputs);
 
+            loop {
+                let choice;
+                if inps.len() < 1 {
+                    println!("No input was captured!");
+                    return;
+                } else if inps.len() == 1 {
+                    choice = &inps[0];
+                } else {
+                    println!(
+                        "Captured multiple! Select the input you want to use (to map to {:?}):",
+                        outputmapping
+                    );
+                    for (index, inp) in inps.iter().enumerate() {
+                        match inp {
+                            GilInputs::Axis(x) => {
+                                println!("{}. Axis: {:?}, code: {}", index + 1, x.0, x.1)
+                            }
+                            GilInputs::Button(x) => {
+                                println!("{}. Button: {:?}, code: {}", index + 1, x.0, x.1)
+                            }
+                        }
+                    }
+                    let userinp = get_user_input("input");
+                    let optional_choice = userinp.parse::<usize>();
+
+                    if optional_choice.is_err() {
+                        println!("Invalid input, try again");
+                        continue;
+                    }
+
+                    let choice = optional_choice.unwrap();
+                    if choice < 1 || choice > inps.len() {
+                        println!("Invalid input, try again");
+                        continue;
+                    }
+                    let x = inps[choice - 1];
+                }
+            }
         }
     }
 }
 
-fn cli_gamepad_settings(inp: &InputType) {
+fn cli_gamepad_settings(inp: &mut InputType) {
     loop {
         // List all output mapping options
         println!("The following options are available to map to (not your input controller!):");
@@ -117,29 +157,32 @@ fn cli_gamepad_settings(inp: &InputType) {
         let userinp = get_user_input("\n\nSelect which button/axis you want to map to:");
         let optional_choice = userinp.parse::<usize>();
 
-        if optional_choice.is_err() {
+        if optional_choice.is_err()
+            || optional_choice.as_ref().unwrap() < &1
+            || optional_choice.as_ref().unwrap() > &GamepadButton::iter().len()
+        {
             println!("Invalid input, try again");
+            continue;
         }
         let choice = optional_choice.unwrap();
 
-        if choice <= button_count {
-            // Button selected
-            let selected_button = GamepadButton::iter().nth(choice - 1).unwrap();
-            println!("You selected button: {:?}", selected_button);
+        // Button selected
+        let selected_button = GamepadButton::iter().nth(choice - 1).unwrap();
+        println!("You selected button: {:?}", selected_button);
 
-            // Await user input
-            cli_map_user_input(inp, OutputMapping::Button(selected_button));
-        }
+        // Await user input
+        cli_map_user_input(inp, OutputMapping::Button(selected_button));
     }
 }
 
-fn cli_gamepads_overview(inps: Vec<InputType>) {
+fn cli_gamepads_overview(inps: &mut Vec<InputType>) {
+    let n_controllers = inps.len();
     loop {
-        println!("Detected {} controller(s):\n", &inps.len());
+        println!("Detected {} controller(s):\n", n_controllers);
 
         let mut n_gamepads: u8 = 0;
 
-        for inp in &inps {
+        for inp in inps {
             n_gamepads += 1;
             match inp {
                 InputType::GilInput(gil_inp) => {
@@ -178,7 +221,8 @@ fn cli_gamepads_overview(inps: Vec<InputType>) {
                 break;
             }
         }
-        cli_gamepad_settings(&inps[choice - 1])
+        // wip fix
+        cli_gamepad_settings(&mut inps[choice - 1])
     }
 }
 
@@ -190,15 +234,16 @@ enum InputType {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let mut inps = vec![];
-    let wii_handler = XWiiHandler::new();
+    // Need to keep gilrs_handler in scope at all times, as it handles the overarching event loop.
+    // It's passed as a ref to other input objs.
     let gilrs_handler = Rc::new(RefCell::new(GilRsHandler::new()));
 
-    for inp in wii_handler.discover_all() {
+    for inp in XWiiInput::discover_all() {
         inps.push(InputType::WiiInput(inp));
     }
 
     let gilrs_handler_b = gilrs_handler.borrow_mut();
-    
+
     for inp in gilrs_handler_b.discover_all(Rc::clone(&gilrs_handler)) {
         inps.push(InputType::GilInput(inp));
     }
@@ -208,7 +253,7 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    cli_gamepads_overview(inps);
+    cli_gamepads_overview(&mut inps);
 
     Ok(())
 }
